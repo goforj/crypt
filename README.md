@@ -263,7 +263,8 @@ _Example: rotate APP_KEY and prepend old key to APP_PREVIOUS_KEYS_
 
 ```go
 tmp := filepath.Join(os.TempDir(), ".env")
-_ = os.WriteFile(tmp, []byte("APP_KEY=base64:oldkey...\n"), 0o644)
+oldKey, _ := crypt.GenerateAppKey()
+_ = os.WriteFile(tmp, []byte("APP_KEY="+oldKey+"\n"), 0o644)
 newKey, err := crypt.RotateKeyInEnv(tmp)
 godump.Dump(err == nil, newKey != "")
 
