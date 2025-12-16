@@ -168,6 +168,9 @@ func extractFuncDocs(
 		}
 
 		name := fn.Name.Name
+		if !ast.IsExported(name) {
+			continue
+		}
 
 		out[name] = &FuncDoc{
 			Name:        name,
@@ -390,6 +393,12 @@ func writeMain(base string, fd *FuncDoc, importPath string) error {
 		}
 		if strings.Contains(ex.Code, "godump.") {
 			imports["github.com/goforj/godump"] = true
+		}
+		if strings.Contains(ex.Code, "rand.") {
+			imports["crypto/rand"] = true
+		}
+		if strings.Contains(ex.Code, "base64.") {
+			imports["encoding/base64"] = true
 		}
 	}
 

@@ -95,6 +95,149 @@ Parse an existing key string:
 keyBytes, err := crypt.ReadAppKey("base64:...") // len == 16 or 32
 ```
 
+## Runnable examples
+
+Every function has a corresponding runnable example under [`./examples`](./examples).
+
+These examples are **generated directly from the documentation blocks** of each function, ensuring the docs and code never drift. These are the same examples you see here in the README and GoDoc.
+
+An automated test executes **every example** to verify it builds and runs successfully.
+
+This guarantees all examples are valid, up-to-date, and remain functional as the API evolves.
+
+<!-- api:embed:start -->
+
+### Index
+
+| Group | Functions |
+|------:|-----------|
+| **Encryption** | [Decrypt](#decrypt) [Encrypt](#encrypt) |
+| **Key management** | [GenerateAppKey](#generateappkey) [GetAppKey](#getappkey) [GetPreviousAppKeys](#getpreviousappkeys) [ReadAppKey](#readappkey) |
+
+
+## Encryption
+
+### <a id="decrypt"></a>Decrypt · readonly
+
+Decrypt decrypts an encrypted payload using the APP_KEY from environment.
+Falls back to APP_PREVIOUS_KEYS when the current key cannot decrypt.
+
+_Example: decrypt using current key_
+
+```go
+keyStr, _ := crypt.GenerateAppKey()
+_ = os.Setenv("APP_KEY", keyStr)
+c, _ := crypt.Encrypt("secret")
+p, _ := crypt.Decrypt(c)
+godump.Dump(p)
+
+// #string "secret"
+```
+
+_Example: decrypt ciphertext encrypted with a previous key_
+
+```go
+oldKeyStr, _ := crypt.GenerateAppKey()
+newKeyStr, _ := crypt.GenerateAppKey()
+_ = os.Setenv("APP_KEY", oldKeyStr)
+oldCipher, _ := crypt.Encrypt("rotated")
+_ = os.Setenv("APP_KEY", newKeyStr)
+_ = os.Setenv("APP_PREVIOUS_KEYS", oldKeyStr)
+plain, err := crypt.Decrypt(oldCipher)
+godump.Dump(plain, err)
+
+// #string "rotated"
+// #error <nil>
+```
+
+### <a id="encrypt"></a>Encrypt · readonly
+
+Encrypt encrypts a plaintext using the APP_KEY from environment.
+
+_Example: encrypt with current APP_KEY_
+
+```go
+keyStr, _ := crypt.GenerateAppKey()
+_ = os.Setenv("APP_KEY", keyStr)
+ciphertext, err := crypt.Encrypt("secret")
+godump.Dump(err == nil, ciphertext != "")
+
+// #bool true
+// #bool true
+```
+
+## Key management
+
+### <a id="generateappkey"></a>GenerateAppKey · readonly
+
+GenerateAppKey generates a random base64 app key prefixed with "base64:".
+
+_Example: generate an AES-256 key_
+
+```go
+key, _ := crypt.GenerateAppKey()
+godump.Dump(key)
+
+// #string "base64:..."
+```
+
+### <a id="getappkey"></a>GetAppKey · readonly
+
+GetAppKey retrieves the APP_KEY from the environment and parses it.
+
+_Example: read APP_KEY and ensure the correct size_
+
+```go
+keyStr, _ := crypt.GenerateAppKey()
+_ = os.Setenv("APP_KEY", keyStr)
+key, err := crypt.GetAppKey()
+godump.Dump(len(key), err)
+
+// #int 32
+// #error <nil>
+```
+
+### <a id="getpreviousappkeys"></a>GetPreviousAppKeys · readonly
+
+GetPreviousAppKeys retrieves and parses APP_PREVIOUS_KEYS from the environment.
+Keys are expected to be comma-delimited and prefixed with "base64:".
+
+_Example: parse two previous keys (mixed AES-128/256)_
+
+```go
+k1, _ := crypt.GenerateAppKey()
+k2, _ := crypt.GenerateAppKey()
+_ = os.Setenv("APP_PREVIOUS_KEYS", k1+", "+k2)
+keys, err := crypt.GetPreviousAppKeys()
+godump.Dump(len(keys), err)
+
+// #int 2
+// #error <nil>
+```
+
+### <a id="readappkey"></a>ReadAppKey · readonly
+
+ReadAppKey parses a base64 encoded app key with "base64:" prefix.
+Accepts 16-byte keys (AES-128) or 32-byte keys (AES-256) after decoding.
+
+_Example: parse AES-128 and AES-256 keys_
+
+```go
+key128raw := make([]byte, 16)
+_, _ = rand.Read(key128raw)
+key128str := "base64:" + base64.StdEncoding.EncodeToString(key128raw)
+
+key256str, _ := crypt.GenerateAppKey()
+
+key128, _ := crypt.ReadAppKey(key128str)
+key256, _ := crypt.ReadAppKey(key256str)
+godump.Dump(len(key128), len(key256))
+
+// #int 16
+// #int 32
+```
+<!-- api:embed:end -->
+
 ## Behavior parity with Laravel
 
 - AES-CBC with PKCS#7 padding
