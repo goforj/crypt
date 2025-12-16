@@ -17,6 +17,8 @@ import (
 	"strings"
 )
 
+var jsonMarshal = json.Marshal
+
 // GenerateAppKey generates a random base64 app key prefixed with "base64:".
 // @group Key management
 // @behavior readonly
@@ -283,7 +285,7 @@ func encryptWithKey(key []byte, plaintext string) (string, error) {
 	macB64 := base64.StdEncoding.EncodeToString(mac)
 
 	payload := EncryptedPayload{IV: ivB64, Value: valB64, MAC: macB64}
-	jsonData, err := json.Marshal(payload)
+	jsonData, err := jsonMarshal(payload)
 	if err != nil {
 		return "", err
 	}

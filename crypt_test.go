@@ -6,8 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
-	"os"
 	"strings"
 	"testing"
 )
@@ -180,10 +180,47 @@ func TestDecryptTamperedPayloadFails(t *testing.T) {
 	}
 }
 
+func TestDecryptInvalidPaddingWithValidMAC(t *testing.T) {
+	key, keyStr := generateKeyPair(t)
+	t.Setenv("APP_KEY", keyStr)
+
+	ciphertext, err := encryptWithKey(key, "pad me")
+	if err != nil {
+		t.Fatalf("encryptWithKey failed: %v", err)
+	}
+
+	raw, _ := base64.StdEncoding.DecodeString(ciphertext)
+	var payload EncryptedPayload
+	_ = json.Unmarshal(raw, &payload)
+
+	ct, _ := base64.StdEncoding.DecodeString(payload.Value)
+	ct[len(ct)-1] = 0 // corrupt padding byte but keep length
+
+	payload.Value = base64.StdEncoding.EncodeToString(ct)
+	// recompute MAC so HMAC passes
+	ivBytes, _ := base64.StdEncoding.DecodeString(payload.IV)
+	newMac := computeHMACSHA256(append(ivBytes, ct...), key)
+	payload.MAC = base64.StdEncoding.EncodeToString(newMac)
+
+	b, _ := json.Marshal(payload)
+	enc := base64.StdEncoding.EncodeToString(b)
+
+	if _, err := Decrypt(enc); err == nil || !strings.Contains(err.Error(), "invalid padding") {
+		t.Fatalf("expected padding error, got %v", err)
+	}
+}
+
 func TestDecryptBase64DecodeError(t *testing.T) {
 	setTestAppKey(t)
 	if _, err := Decrypt("!not-base64"); err == nil || !strings.Contains(err.Error(), "base64 decode failed") {
 		t.Fatalf("expected base64 error, got %v", err)
+	}
+}
+
+func TestDecryptMissingAppKey(t *testing.T) {
+	t.Setenv("APP_KEY", "")
+	if _, err := Decrypt("anything"); err == nil {
+		t.Fatalf("expected error when APP_KEY missing")
 	}
 }
 
@@ -311,6 +348,23 @@ func TestGetAppKeyErrorWhenMissing(t *testing.T) {
 	}
 }
 
+func TestEncryptWithKeyInvalidSize(t *testing.T) {
+	if _, err := encryptWithKey([]byte{1, 2, 3}, "data"); err == nil {
+		t.Fatalf("expected invalid key size error")
+	}
+}
+
+func TestEncryptWithKeyRandError(t *testing.T) {
+	key, _ := generateKeyPair(t)
+	orig := rand.Reader
+	rand.Reader = failingReader{}
+	defer func() { rand.Reader = orig }()
+
+	if _, err := encryptWithKey(key, "data"); err == nil {
+		t.Fatalf("expected rand failure")
+	}
+}
+
 func TestDecryptFailsOnInvalidPreviousKeys(t *testing.T) {
 	_, currentKeyStr := generateKeyPair(t)
 	t.Setenv("APP_KEY", currentKeyStr)
@@ -408,6 +462,47 @@ func TestGenerateAppKeyRandError(t *testing.T) {
 func TestDecryptWithKeyBase64Failure(t *testing.T) {
 	if _, err := decryptWithKey(make([]byte, 16), "???"); err == nil || !strings.Contains(err.Error(), "base64 decode failed") {
 		t.Fatalf("expected base64 decode failure")
+	}
+}
+
+func TestDecryptWithKeyInvalidKeySize(t *testing.T) {
+	_, keyStr := generateKeyPair(t)
+	t.Setenv("APP_KEY", keyStr)
+
+	ciphertext, err := Encrypt("data")
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+
+	// 17-byte key
+	badKey := make([]byte, 17)
+
+	// rebuild payload with MAC generated from the bad key so HMAC passes and cipher init fails
+	raw, _ := base64.StdEncoding.DecodeString(ciphertext)
+	var payload EncryptedPayload
+	_ = json.Unmarshal(raw, &payload)
+	ivBytes, _ := base64.StdEncoding.DecodeString(payload.IV)
+	ctBytes, _ := base64.StdEncoding.DecodeString(payload.Value)
+	payload.MAC = base64.StdEncoding.EncodeToString(computeHMACSHA256(append(ivBytes, ctBytes...), badKey))
+	modified, _ := json.Marshal(payload)
+	enc := base64.StdEncoding.EncodeToString(modified)
+
+	if _, err := decryptWithKey(badKey, enc); err == nil || !strings.Contains(err.Error(), "invalid key size") {
+		t.Fatalf("expected invalid key size error, got %v", err)
+	}
+}
+
+func TestEncryptMarshalError(t *testing.T) {
+	orig := jsonMarshal
+	defer func() { jsonMarshal = orig }()
+
+	jsonMarshal = func(v any) ([]byte, error) {
+		return nil, errors.New("marshal boom")
+	}
+
+	key, _ := generateKeyPair(t)
+	if _, err := encryptWithKey(key, "data"); err == nil || !strings.Contains(err.Error(), "marshal boom") {
+		t.Fatalf("expected marshal error, got %v", err)
 	}
 }
 
