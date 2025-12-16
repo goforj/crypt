@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-    Laravel-compatible symmetric encryption for Go — AES-128/256 CBC with HMAC, key rotation, and portable payloads.
+    Laravel-compatible symmetric encryption for Go - AES-128/256 CBC with HMAC, key rotation, and portable payloads.
 </p>
 
 <p align="center">
