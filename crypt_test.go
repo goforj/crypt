@@ -3,13 +3,13 @@ package crypt
 import (
 	"bytes"
 	"crypto/aes"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"os"
 	"strings"
 	"testing"
-
-	"crypto/rand"
 )
 
 func setTestAppKey(t *testing.T) {
@@ -102,6 +102,19 @@ func TestReadAppKeySupports128And256(t *testing.T) {
 func TestReadAppKeyErrorsOnPrefix(t *testing.T) {
 	if _, err := ReadAppKey("invalidprefix"); err == nil {
 		t.Fatalf("Expected prefix error")
+	}
+}
+
+func TestReadAppKeyBase64Error(t *testing.T) {
+	if _, err := ReadAppKey("base64:not-valid"); err == nil {
+		t.Fatalf("expected base64 decode error")
+	}
+}
+
+func TestReadAppKeyInvalidKeySize(t *testing.T) {
+	raw := base64.StdEncoding.EncodeToString(make([]byte, 8))
+	if _, err := ReadAppKey("base64:" + raw); err == nil {
+		t.Fatalf("expected invalid size error")
 	}
 }
 

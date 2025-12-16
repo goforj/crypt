@@ -29,7 +29,7 @@ import (
 //	// #string "base64:..."
 func GenerateAppKey() (string, error) {
 	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
+	if _, err := io.ReadFull(rand.Reader, key); err != nil {
 		return "", err
 	}
 	encoded := base64.StdEncoding.EncodeToString(key)
