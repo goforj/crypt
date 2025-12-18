@@ -154,8 +154,6 @@ godump.Dump(plain, err)
 
 Encrypt encrypts a plaintext using the APP_KEY from environment.
 
-_Example: encrypt with current APP_KEY_
-
 ```go
 keyStr, _ := crypt.GenerateAppKey()
 _ = os.Setenv("APP_KEY", keyStr)
@@ -172,8 +170,6 @@ godump.Dump(err == nil, ciphertext != "")
 
 GenerateAppKey generates a random base64 app key prefixed with "base64:".
 
-_Example: generate an AES-256 key_
-
 ```go
 key, _ := crypt.GenerateAppKey()
 godump.Dump(key)
@@ -187,8 +183,6 @@ GenerateKeyToEnv mimics Laravel's key:generate.
 It generates a new APP_KEY and writes it to the provided .env path.
 Other keys are preserved; APP_KEY is replaced/added.
 
-_Example: generate and write APP_KEY to a temp .env_
-
 ```go
 tmp := filepath.Join(os.TempDir(), ".env")
 key, err := crypt.GenerateKeyToEnv(tmp)
@@ -201,8 +195,6 @@ godump.Dump(err, key)
 ### <a id="getappkey"></a>GetAppKey · readonly
 
 GetAppKey retrieves the APP_KEY from the environment and parses it.
-
-_Example: read APP_KEY and ensure the correct size_
 
 ```go
 keyStr, _ := crypt.GenerateAppKey()
@@ -219,8 +211,6 @@ godump.Dump(len(key), err)
 GetPreviousAppKeys retrieves and parses APP_PREVIOUS_KEYS from the environment.
 Keys are expected to be comma-delimited and prefixed with "base64:".
 
-_Example: parse two previous keys (mixed AES-128/256)_
-
 ```go
 k1, _ := crypt.GenerateAppKey()
 k2, _ := crypt.GenerateAppKey()
@@ -236,8 +226,6 @@ godump.Dump(len(keys), err)
 
 ReadAppKey parses a base64 encoded app key with "base64:" prefix.
 Accepts 16-byte keys (AES-128) or 32-byte keys (AES-256) after decoding.
-
-_Example: parse AES-128 and AES-256 keys_
 
 ```go
 key128raw := make([]byte, 16)
@@ -259,8 +247,6 @@ godump.Dump(len(key128), len(key256))
 RotateKeyInEnv mimics Laravel's key:rotate.
 It moves the current APP_KEY into APP_PREVIOUS_KEYS (prepended) and writes a new APP_KEY.
 
-_Example: rotate APP_KEY and prepend old key to APP_PREVIOUS_KEYS_
-
 ```go
 tmp := filepath.Join(os.TempDir(), ".env")
 oldKey, _ := crypt.GenerateAppKey()
@@ -272,20 +258,3 @@ godump.Dump(err == nil, newKey != "")
 // #bool true
 ```
 <!-- api:embed:end -->
-
-## Behavior parity with Laravel
-
-- AES-CBC with PKCS#7 padding
-- HMAC-SHA256 over IV + ciphertext
-- JSON payload wrapped in base64 (fields: `iv`, `value`, `mac`)
-- Compatible with Laravel's `Crypt::encryptString` / `decryptString`
-
-## Testing
-
-```bash
-go test ./...
-```
-
-## License
-
-MIT
