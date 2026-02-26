@@ -25,6 +25,14 @@ jobs:
       - name: Run tests
         run: go test ./... -v
 
+      - name: Install example dependencies
+        working-directory: examples
+        run: go mod tidy
+
+      - name: Run example compile tests
+        working-directory: examples
+        run: go test -v
+
       - name: Run tests with coverage
         run: go test -coverprofile=coverage.txt
 

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./docs/images/logo.png?v=2" width="400" alt="crypt logo">
+  <img src="./docs/images/logo.png?v=2" width="300" alt="crypt logo">
 </p>
 
 <p align="center">
@@ -135,7 +135,6 @@ _ = os.Setenv("APP_KEY", keyStr)
 c, _ := crypt.Encrypt("secret")
 p, _ := crypt.Decrypt(c)
 godump.Dump(p)
-
 // #string "secret"
 ```
 
@@ -150,7 +149,6 @@ _ = os.Setenv("APP_KEY", newKeyStr)
 _ = os.Setenv("APP_PREVIOUS_KEYS", oldKeyStr)
 plain, err := crypt.Decrypt(oldCipher)
 godump.Dump(plain, err)
-
 // #string "rotated"
 // #error <nil>
 ```
@@ -164,7 +162,6 @@ keyStr, _ := crypt.GenerateAppKey()
 _ = os.Setenv("APP_KEY", keyStr)
 ciphertext, err := crypt.Encrypt("secret")
 godump.Dump(err == nil, ciphertext != "")
-
 // #bool true
 // #bool true
 ```
@@ -178,7 +175,6 @@ GenerateAppKey generates a random base64 app key prefixed with "base64:".
 ```go
 key, _ := crypt.GenerateAppKey()
 godump.Dump(key)
-
 // #string "base64:..."
 ```
 
@@ -192,7 +188,6 @@ Other keys are preserved; APP_KEY is replaced/added.
 tmp := filepath.Join(os.TempDir(), ".env")
 key, err := crypt.GenerateKeyToEnv(tmp)
 godump.Dump(err, key)
-
 // #error <nil>
 // #string "base64:..."
 ```
@@ -206,7 +201,6 @@ keyStr, _ := crypt.GenerateAppKey()
 _ = os.Setenv("APP_KEY", keyStr)
 key, err := crypt.GetAppKey()
 godump.Dump(len(key), err)
-
 // #int 32
 // #error <nil>
 ```
@@ -222,7 +216,6 @@ k2, _ := crypt.GenerateAppKey()
 _ = os.Setenv("APP_PREVIOUS_KEYS", k1+", "+k2)
 keys, err := crypt.GetPreviousAppKeys()
 godump.Dump(len(keys), err)
-
 // #int 2
 // #error <nil>
 ```
@@ -242,7 +235,6 @@ key256str, _ := crypt.GenerateAppKey()
 key128, _ := crypt.ReadAppKey(key128str)
 key256, _ := crypt.ReadAppKey(key256str)
 godump.Dump(len(key128), len(key256))
-
 // #int 16
 // #int 32
 ```
@@ -258,7 +250,6 @@ oldKey, _ := crypt.GenerateAppKey()
 _ = os.WriteFile(tmp, []byte("APP_KEY="+oldKey+"\n"), 0o644)
 newKey, err := crypt.RotateKeyInEnv(tmp)
 godump.Dump(err == nil, newKey != "")
-
 // #bool true
 // #bool true
 ```

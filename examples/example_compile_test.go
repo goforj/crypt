@@ -1,10 +1,12 @@
-package crypt
+package examples
 
 import (
 	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	_ "github.com/goforj/crypt"
+	_ "github.com/goforj/godump"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,9 +15,7 @@ import (
 )
 
 func TestExamplesBuild(t *testing.T) {
-	examplesDir := "examples"
-
-	entries, err := os.ReadDir(examplesDir)
+	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("cannot read examples directory: %v", err)
 	}
@@ -25,12 +25,12 @@ func TestExamplesBuild(t *testing.T) {
 			continue
 		}
 
-		// CAPTURE LOOP VARS
+		// Capture loop vars for parallel subtests.
 		name := e.Name()
-		path := filepath.Join(examplesDir, name)
+		path := filepath.Join(name)
 
 		t.Run(name, func(t *testing.T) {
-			t.Parallel() // 🔑 enable concurrency
+			t.Parallel()
 
 			if err := buildExampleWithoutTags(path); err != nil {
 				t.Fatalf("example %q failed to build:\n%s", name, err)
@@ -64,7 +64,7 @@ func buildExampleWithoutTags(exampleDir string) error {
 	defer os.RemoveAll(tmpDir)
 
 	tmpFile := filepath.Join(tmpDir, "main.go")
-	if err := os.WriteFile(tmpFile, clean, 0644); err != nil {
+	if err := os.WriteFile(tmpFile, clean, 0o644); err != nil {
 		return err
 	}
 
@@ -80,7 +80,7 @@ func buildExampleWithoutTags(exampleDir string) error {
 	}
 
 	overlayPath := filepath.Join(tmpDir, "overlay.json")
-	if err := os.WriteFile(overlayPath, overlayJSON, 0644); err != nil {
+	if err := os.WriteFile(overlayPath, overlayJSON, 0o644); err != nil {
 		return err
 	}
 

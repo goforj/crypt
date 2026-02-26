@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/goforj/godump"
 	"io"
 	"os"
 	"strings"
@@ -27,7 +26,6 @@ var jsonMarshal = json.Marshal
 //
 //	key, _ := crypt.GenerateAppKey()
 //	godump.Dump(key)
-//
 //	// #string "base64:..."
 func GenerateAppKey() (string, error) {
 	key := make([]byte, 32)
@@ -48,7 +46,6 @@ func GenerateAppKey() (string, error) {
 //	_ = os.Setenv("APP_KEY", keyStr)
 //	key, err := crypt.GetAppKey()
 //	godump.Dump(len(key), err)
-//
 //	// #int 32
 //	// #error <nil>
 func GetAppKey() ([]byte, error) {
@@ -71,7 +68,6 @@ func GetAppKey() ([]byte, error) {
 //	_ = os.Setenv("APP_PREVIOUS_KEYS", k1+", "+k2)
 //	keys, err := crypt.GetPreviousAppKeys()
 //	godump.Dump(len(keys), err)
-//
 //	// #int 2
 //	// #error <nil>
 func GetPreviousAppKeys() ([][]byte, error) {
@@ -112,7 +108,6 @@ func GetPreviousAppKeys() ([][]byte, error) {
 //	key128, _ := crypt.ReadAppKey(key128str)
 //	key256, _ := crypt.ReadAppKey(key256str)
 //	godump.Dump(len(key128), len(key256))
-//
 //	// #int 16
 //	// #int 32
 func ReadAppKey(key string) ([]byte, error) {
@@ -138,7 +133,6 @@ func ReadAppKey(key string) ([]byte, error) {
 //
 //	p := crypt.pkcs7Pad([]byte("abc"), 4)
 //	godump.Dump(p)
-//
 //	// #[]uint8 [
 //	//   0 => 97 #uint8
 //	//   1 => 98 #uint8
@@ -159,7 +153,6 @@ func pkcs7Pad(data []byte, blockSize int) []byte {
 //
 //	out, _ := crypt.pkcs7Unpad([]byte{97, 98, 99, 1})
 //	godump.Dump(string(out))
-//
 //	// #string "abc"
 func pkcs7Unpad(data []byte) ([]byte, error) {
 	if len(data) == 0 {
@@ -194,7 +187,6 @@ type EncryptedPayload struct {
 //	_ = os.Setenv("APP_KEY", keyStr)
 //	ciphertext, err := crypt.Encrypt("secret")
 //	godump.Dump(err == nil, ciphertext != "")
-//
 //	// #bool true
 //	// #bool true
 func Encrypt(plaintext string) (string, error) {
@@ -217,7 +209,6 @@ func Encrypt(plaintext string) (string, error) {
 //	c, _ := crypt.Encrypt("secret")
 //	p, _ := crypt.Decrypt(c)
 //	godump.Dump(p)
-//
 //	// #string "secret"
 //
 // Example: decrypt ciphertext encrypted with a previous key
@@ -230,7 +221,6 @@ func Encrypt(plaintext string) (string, error) {
 //	_ = os.Setenv("APP_PREVIOUS_KEYS", oldKeyStr)
 //	plain, err := crypt.Decrypt(oldCipher)
 //	godump.Dump(plain, err)
-//
 //	// #string "rotated"
 //	// #error <nil>
 func Decrypt(encodedPayload string) (string, error) {
@@ -352,7 +342,6 @@ func decryptWithKey(key []byte, encodedPayload string) (string, error) {
 //
 //	m := crypt.computeHMACSHA256([]byte("msg"), []byte("key"))
 //	godump.Dump(len(m))
-//
 //	// #int 32
 func computeHMACSHA256(data []byte, key []byte) []byte {
 	h := hmac.New(sha256.New, key)
@@ -360,7 +349,7 @@ func computeHMACSHA256(data []byte, key []byte) []byte {
 	return h.Sum(nil)
 }
 
-// dumpExample is a no-op wrapper to keep the godump import live for doc examples.
+// dumpExample is a no-op wrapper referenced by tests to preserve doc example coverage hooks.
 func dumpExample(values ...interface{}) {
-	godump.Dump(values...)
+	_ = values
 }

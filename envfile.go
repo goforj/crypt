@@ -17,7 +17,6 @@ import (
 //	tmp := filepath.Join(os.TempDir(), ".env")
 //	key, err := crypt.GenerateKeyToEnv(tmp)
 //	godump.Dump(err, key)
-//
 //	// #error <nil>
 //	// #string "base64:..."
 func GenerateKeyToEnv(envPath string) (string, error) {
@@ -43,7 +42,6 @@ func GenerateKeyToEnv(envPath string) (string, error) {
 //	_ = os.WriteFile(tmp, []byte("APP_KEY="+oldKey+"\n"), 0o644)
 //	newKey, err := crypt.RotateKeyInEnv(tmp)
 //	godump.Dump(err == nil, newKey != "")
-//
 //	// #bool true
 //	// #bool true
 func RotateKeyInEnv(envPath string) (string, error) {
