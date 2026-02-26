@@ -14,6 +14,5 @@ func main() {
 	// Example: generate an AES-256 key
 	key, _ := crypt.GenerateAppKey()
 	godump.Dump(key)
-
 	// #string "base64:..."
 }

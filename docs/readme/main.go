@@ -63,7 +63,9 @@ func run() error {
 //
 
 type FuncDoc struct {
+	Key         string
 	Name        string
+	Namespace   string
 	Group       string
 	Behavior    string
 	Fluent      string
@@ -129,7 +131,9 @@ func parseFuncs(root string) ([]*FuncDoc, error) {
 			}
 
 			fd := &FuncDoc{
+				Key:         funcKey(fn),
 				Name:        fn.Name.Name,
+				Namespace:   inferNamespace(fn),
 				Group:       extractGroup(fn.Doc),
 				Behavior:    extractBehavior(fn.Doc),
 				Fluent:      extractFluent(fn.Doc),
@@ -137,10 +141,10 @@ func parseFuncs(root string) ([]*FuncDoc, error) {
 				Examples:    extractExamples(fset, fn),
 			}
 
-			if existing, ok := funcs[fd.Name]; ok {
+			if existing, ok := funcs[fd.Key]; ok {
 				existing.Examples = append(existing.Examples, fd.Examples...)
 			} else {
-				funcs[fd.Name] = fd
+				funcs[fd.Key] = fd
 			}
 		}
 	}
@@ -255,6 +259,34 @@ func extractExamples(fset *token.FileSet, fn *ast.FuncDecl) []Example {
 	return out
 }
 
+func funcKey(fn *ast.FuncDecl) string {
+	return inferNamespace(fn) + ":" + fn.Name.Name
+}
+
+func inferNamespace(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return "Package"
+	}
+	return receiverTypeName(fn.Recv.List[0].Type)
+}
+
+func receiverTypeName(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.StarExpr:
+		return receiverTypeName(t.X)
+	case *ast.IndexExpr:
+		return receiverTypeName(t.X)
+	case *ast.IndexListExpr:
+		return receiverTypeName(t.X)
+	case *ast.SelectorExpr:
+		return t.Sel.Name
+	default:
+		return "Receiver"
+	}
+}
+
 // selectPackage picks the primary package to document.
 // Strategy:
 //  1. If only one package exists, use it.
@@ -307,10 +339,13 @@ func selectPackage(pkgs map[string]*ast.Package) (string, error) {
 //
 
 func renderAPI(funcs []*FuncDoc) string {
-	byGroup := map[string][]*FuncDoc{}
+	byGroup := map[string]map[string][]*FuncDoc{}
 
 	for _, fd := range funcs {
-		byGroup[fd.Group] = append(byGroup[fd.Group], fd)
+		if byGroup[fd.Group] == nil {
+			byGroup[fd.Group] = map[string][]*FuncDoc{}
+		}
+		byGroup[fd.Group][fd.Namespace] = append(byGroup[fd.Group][fd.Namespace], fd)
 	}
 
 	groupNames := make([]string, 0, len(byGroup))
@@ -323,23 +358,25 @@ func renderAPI(funcs []*FuncDoc) string {
 
 	// ---------------- Index ----------------
 	buf.WriteString("## API Index\n\n")
-	buf.WriteString("| Group | Functions |\n")
-	buf.WriteString("|------:|-----------|\n")
+	buf.WriteString("| Group | Namespace | Functions |\n")
+	buf.WriteString("|------:|-----------|-----------|\n")
 
 	for _, group := range groupNames {
-		sort.Slice(byGroup[group], func(i, j int) bool {
-			return byGroup[group][i].Name < byGroup[group][j].Name
-		})
+		namespaceNames := sortedNamespaces(byGroup[group])
+		for _, ns := range namespaceNames {
+			sortFuncs(byGroup[group][ns])
 
-		var links []string
-		for _, fn := range byGroup[group] {
-			links = append(links, fmt.Sprintf("[%s](#%s)", fn.Name, strings.ToLower(fn.Name)))
+			var links []string
+			for _, fn := range byGroup[group][ns] {
+				links = append(links, fmt.Sprintf("[%s](#%s)", displayName(fn), anchorID(fn)))
+			}
+
+			buf.WriteString(fmt.Sprintf("| %s | %s | %s |\n",
+				"**"+group+"**",
+				namespaceLabel(ns),
+				strings.Join(links, " "),
+			))
 		}
-
-		buf.WriteString(fmt.Sprintf("| **%s** | %s |\n",
-			group,
-			strings.Join(links, " "),
-		))
 	}
 
 	buf.WriteString("\n\n")
@@ -348,36 +385,95 @@ func renderAPI(funcs []*FuncDoc) string {
 	for _, group := range groupNames {
 		buf.WriteString("## " + group + "\n\n")
 
-		for _, fn := range byGroup[group] {
-			anchor := strings.ToLower(fn.Name)
+		namespaceNames := sortedNamespaces(byGroup[group])
+		for _, ns := range namespaceNames {
+			sortFuncs(byGroup[group][ns])
 
-			header := fn.Name
-			if fn.Behavior != "" {
-				header += " · " + fn.Behavior
-			}
-			if fn.Fluent == "true" {
-				header += " · fluent"
-			}
+			buf.WriteString("### " + namespaceLabel(ns) + "\n\n")
 
-			buf.WriteString(fmt.Sprintf("### <a id=\"%s\"></a>%s\n\n", anchor, header))
-
-			if fn.Description != "" {
-				buf.WriteString(fn.Description + "\n\n")
-			}
-
-			for _, ex := range fn.Examples {
-				if ex.Label != "" && len(fn.Examples) > 1 {
-					buf.WriteString(fmt.Sprintf("_Example: %s_\n\n", ex.Label))
+			for _, fn := range byGroup[group][ns] {
+				header := displayName(fn)
+				if fn.Fluent == "true" {
+					header += " · fluent"
 				}
 
-				buf.WriteString("```go\n")
-				buf.WriteString(strings.TrimSpace(ex.Code))
-				buf.WriteString("\n```\n\n")
+				buf.WriteString(fmt.Sprintf("#### <a id=\"%s\"></a>%s\n\n", anchorID(fn), header))
+
+				if fn.Description != "" {
+					buf.WriteString(fn.Description + "\n\n")
+				}
+
+				for _, ex := range fn.Examples {
+					if ex.Label != "" && len(fn.Examples) > 1 {
+						buf.WriteString(fmt.Sprintf("_Example: %s_\n\n", ex.Label))
+					}
+
+					buf.WriteString("```go\n")
+					buf.WriteString(strings.TrimSpace(ex.Code))
+					buf.WriteString("\n```\n\n")
+				}
 			}
 		}
 	}
 
 	return strings.TrimRight(buf.String(), "\n")
+}
+
+func sortedNamespaces(byNamespace map[string][]*FuncDoc) []string {
+	names := make([]string, 0, len(byNamespace))
+	for ns := range byNamespace {
+		names = append(names, ns)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		return namespaceSortRank(names[i]) < namespaceSortRank(names[j]) ||
+			(namespaceSortRank(names[i]) == namespaceSortRank(names[j]) && names[i] < names[j])
+	})
+	return names
+}
+
+func namespaceSortRank(ns string) int {
+	switch ns {
+	case "Package":
+		return 0
+	case "Cipher":
+		return 1
+	default:
+		return 10
+	}
+}
+
+func namespaceLabel(ns string) string {
+	switch ns {
+	case "Package":
+		return "Global"
+	case "Cipher":
+		return "Instanced"
+	default:
+		return ns
+	}
+}
+
+func sortFuncs(funcs []*FuncDoc) {
+	sort.Slice(funcs, func(i, j int) bool {
+		if funcs[i].Name == funcs[j].Name {
+			return funcs[i].Namespace < funcs[j].Namespace
+		}
+		return funcs[i].Name < funcs[j].Name
+	})
+}
+
+func displayName(fd *FuncDoc) string {
+	if fd.Namespace == "Package" {
+		return fd.Name
+	}
+	return fd.Namespace + "." + fd.Name
+}
+
+func anchorID(fd *FuncDoc) string {
+	if fd.Namespace == "Package" {
+		return strings.ToLower(fd.Name)
+	}
+	return strings.ToLower(fd.Namespace + "-" + fd.Name)
 }
 
 //

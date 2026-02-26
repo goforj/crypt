@@ -20,7 +20,6 @@ func main() {
 	_ = os.WriteFile(tmp, []byte("APP_KEY="+oldKey+"\n"), 0o644)
 	newKey, err := crypt.RotateKeyInEnv(tmp)
 	godump.Dump(err == nil, newKey != "")
-
 	// #bool true
 	// #bool true
 }

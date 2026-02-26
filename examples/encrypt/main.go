@@ -17,7 +17,6 @@ func main() {
 	_ = os.Setenv("APP_KEY", keyStr)
 	ciphertext, err := crypt.Encrypt("secret")
 	godump.Dump(err == nil, ciphertext != "")
-
 	// #bool true
 	// #bool true
 }

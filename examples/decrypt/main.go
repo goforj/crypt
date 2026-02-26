@@ -19,7 +19,6 @@ func main() {
 	c, _ := crypt.Encrypt("secret")
 	p, _ := crypt.Decrypt(c)
 	godump.Dump(p)
-
 	// #string "secret"
 
 	// Example: decrypt ciphertext encrypted with a previous key
@@ -31,7 +30,6 @@ func main() {
 	_ = os.Setenv("APP_PREVIOUS_KEYS", oldKeyStr)
 	plain, err := crypt.Decrypt(oldCipher)
 	godump.Dump(plain, err)
-
 	// #string "rotated"
 	// #error <nil>
 }

@@ -63,11 +63,11 @@ func run() error {
 			continue
 		}
 
-		for name, fd := range extractFuncDocs(fset, filename, file) {
-			if existing, ok := funcs[name]; ok {
+		for key, fd := range extractFuncDocs(fset, filename, file) {
+			if existing, ok := funcs[key]; ok {
 				existing.Examples = append(existing.Examples, fd.Examples...)
 			} else {
-				funcs[name] = fd
+				funcs[key] = fd
 			}
 		}
 	}
@@ -125,7 +125,9 @@ func modulePath(root string) (string, error) {
 //
 
 type FuncDoc struct {
+	Key         string
 	Name        string
+	Namespace   string
 	Group       string
 	Description string
 	Examples    []Example
@@ -172,8 +174,10 @@ func extractFuncDocs(
 			continue
 		}
 
-		out[name] = &FuncDoc{
+		out[funcKey(fn)] = &FuncDoc{
+			Key:         funcKey(fn),
 			Name:        name,
+			Namespace:   inferNamespace(fn),
 			Group:       extractGroup(fn.Doc),
 			Description: extractFuncDescription(fn.Doc),
 			Examples:    extractBlocks(fset, filename, name, fn),
@@ -181,6 +185,34 @@ func extractFuncDocs(
 	}
 
 	return out
+}
+
+func funcKey(fn *ast.FuncDecl) string {
+	return inferNamespace(fn) + ":" + fn.Name.Name
+}
+
+func inferNamespace(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return "Package"
+	}
+	return receiverTypeName(fn.Recv.List[0].Type)
+}
+
+func receiverTypeName(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.StarExpr:
+		return receiverTypeName(t.X)
+	case *ast.IndexExpr:
+		return receiverTypeName(t.X)
+	case *ast.IndexListExpr:
+		return receiverTypeName(t.X)
+	case *ast.SelectorExpr:
+		return t.Sel.Name
+	default:
+		return "Receiver"
+	}
 }
 
 func extractGroup(group *ast.CommentGroup) string {
@@ -361,7 +393,7 @@ func writeMain(base string, fd *FuncDoc, importPath string) error {
 		return fmt.Errorf("import path cannot be empty")
 	}
 
-	dir := filepath.Join(base, strings.ToLower(fd.Name))
+	dir := filepath.Join(base, exampleDirName(fd))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -451,4 +483,11 @@ func writeMain(base string, fd *FuncDoc, importPath string) error {
 	buf.WriteString("}\n")
 
 	return os.WriteFile(filepath.Join(dir, "main.go"), buf.Bytes(), 0o644)
+}
+
+func exampleDirName(fd *FuncDoc) string {
+	if fd.Namespace == "Package" {
+		return strings.ToLower(fd.Name)
+	}
+	return strings.ToLower(fd.Namespace + "_" + fd.Name)
 }

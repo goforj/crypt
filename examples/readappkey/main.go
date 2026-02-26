@@ -24,7 +24,6 @@ func main() {
 	key128, _ := crypt.ReadAppKey(key128str)
 	key256, _ := crypt.ReadAppKey(key256str)
 	godump.Dump(len(key128), len(key256))
-
 	// #int 16
 	// #int 32
 }

@@ -114,15 +114,18 @@ This guarantees all examples are valid, up-to-date, and remain functional as the
 
 ## API Index
 
-| Group | Functions |
-|------:|-----------|
-| **Encryption** | [Decrypt](#decrypt) [Encrypt](#encrypt) |
-| **Key management** | [GenerateAppKey](#generateappkey) [GenerateKeyToEnv](#generatekeytoenv) [GetAppKey](#getappkey) [GetPreviousAppKeys](#getpreviousappkeys) [ReadAppKey](#readappkey) [RotateKeyInEnv](#rotatekeyinenv) |
+| Group | Namespace | Functions |
+|------:|-----------|-----------|
+| **Encryption** | Global | [Decrypt](#decrypt) [Encrypt](#encrypt) |
+| **Encryption** | Instanced | [Cipher.Decrypt](#cipher-decrypt) [Cipher.Encrypt](#cipher-encrypt) |
+| **Key management** | Global | [GenerateAppKey](#generateappkey) [GenerateKeyToEnv](#generatekeytoenv) [GetAppKey](#getappkey) [GetPreviousAppKeys](#getpreviousappkeys) [New](#new) [NewFromEnv](#newfromenv) [ReadAppKey](#readappkey) [RotateKeyInEnv](#rotatekeyinenv) |
 
 
 ## Encryption
 
-### <a id="decrypt"></a>Decrypt · readonly
+### Global
+
+#### <a id="decrypt"></a>Decrypt
 
 Decrypt decrypts an encrypted payload using the APP_KEY from environment.
 Falls back to APP_PREVIOUS_KEYS when the current key cannot decrypt.
@@ -153,7 +156,7 @@ godump.Dump(plain, err)
 // #error <nil>
 ```
 
-### <a id="encrypt"></a>Encrypt · readonly
+#### <a id="encrypt"></a>Encrypt
 
 Encrypt encrypts a plaintext using the APP_KEY from environment.
 
@@ -166,9 +169,21 @@ godump.Dump(err == nil, ciphertext != "")
 // #bool true
 ```
 
+### Instanced
+
+#### <a id="cipher-decrypt"></a>Cipher.Decrypt
+
+Decrypt decrypts ciphertext with the current key, then any configured previous keys.
+
+#### <a id="cipher-encrypt"></a>Cipher.Encrypt
+
+Encrypt encrypts plaintext with the Cipher's injected current key.
+
 ## Key management
 
-### <a id="generateappkey"></a>GenerateAppKey · readonly
+### Global
+
+#### <a id="generateappkey"></a>GenerateAppKey
 
 GenerateAppKey generates a random base64 app key prefixed with "base64:".
 
@@ -178,7 +193,7 @@ godump.Dump(key)
 // #string "base64:..."
 ```
 
-### <a id="generatekeytoenv"></a>GenerateKeyToEnv · mutates-filesystem
+#### <a id="generatekeytoenv"></a>GenerateKeyToEnv
 
 GenerateKeyToEnv mimics Laravel's key:generate.
 It generates a new APP_KEY and writes it to the provided .env path.
@@ -192,7 +207,7 @@ godump.Dump(err, key)
 // #string "base64:..."
 ```
 
-### <a id="getappkey"></a>GetAppKey · readonly
+#### <a id="getappkey"></a>GetAppKey
 
 GetAppKey retrieves the APP_KEY from the environment and parses it.
 
@@ -205,7 +220,7 @@ godump.Dump(len(key), err)
 // #error <nil>
 ```
 
-### <a id="getpreviousappkeys"></a>GetPreviousAppKeys · readonly
+#### <a id="getpreviousappkeys"></a>GetPreviousAppKeys
 
 GetPreviousAppKeys retrieves and parses APP_PREVIOUS_KEYS from the environment.
 Keys are expected to be comma-delimited and prefixed with "base64:".
@@ -220,7 +235,16 @@ godump.Dump(len(keys), err)
 // #error <nil>
 ```
 
-### <a id="readappkey"></a>ReadAppKey · readonly
+#### <a id="new"></a>New
+
+New constructs a Cipher with an injected current key and optional previous keys.
+Keys must be 16 bytes (AES-128) or 32 bytes (AES-256). Inputs are copied.
+
+#### <a id="newfromenv"></a>NewFromEnv
+
+NewFromEnv constructs a Cipher from APP_KEY and APP_PREVIOUS_KEYS.
+
+#### <a id="readappkey"></a>ReadAppKey
 
 ReadAppKey parses a base64 encoded app key with "base64:" prefix.
 Accepts 16-byte keys (AES-128) or 32-byte keys (AES-256) after decoding.
@@ -239,7 +263,7 @@ godump.Dump(len(key128), len(key256))
 // #int 32
 ```
 
-### <a id="rotatekeyinenv"></a>RotateKeyInEnv · mutates-filesystem
+#### <a id="rotatekeyinenv"></a>RotateKeyInEnv
 
 RotateKeyInEnv mimics Laravel's key:rotate.
 It moves the current APP_KEY into APP_PREVIOUS_KEYS (prepended) and writes a new APP_KEY.

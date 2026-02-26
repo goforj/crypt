@@ -18,6 +18,77 @@ import (
 
 var jsonMarshal = json.Marshal
 
+// Cipher provides instance-based encryption/decryption with injected keys.
+// It is safe to construct in DI containers and avoids relying on process-global env state.
+// @group Encryption
+// @behavior readonly
+type Cipher struct {
+	key          []byte
+	previousKeys [][]byte
+}
+
+// New constructs a Cipher with an injected current key and optional previous keys.
+// Keys must be 16 bytes (AES-128) or 32 bytes (AES-256). Inputs are copied.
+// @group Key management
+// @behavior readonly
+func New(key []byte, previousKeys ...[]byte) (*Cipher, error) {
+	current, err := cloneAndValidateAESKey(key)
+	if err != nil {
+		return nil, fmt.Errorf("invalid current key: %w", err)
+	}
+
+	prev := make([][]byte, 0, len(previousKeys))
+	for i, k := range previousKeys {
+		cloned, err := cloneAndValidateAESKey(k)
+		if err != nil {
+			return nil, fmt.Errorf("invalid previous key at index %d: %w", i, err)
+		}
+		prev = append(prev, cloned)
+	}
+
+	return &Cipher{
+		key:          current,
+		previousKeys: prev,
+	}, nil
+}
+
+// NewFromEnv constructs a Cipher from APP_KEY and APP_PREVIOUS_KEYS.
+// @group Key management
+// @behavior readonly
+func NewFromEnv() (*Cipher, error) {
+	key, err := GetAppKey()
+	if err != nil {
+		return nil, err
+	}
+
+	previousKeys, err := GetPreviousAppKeys()
+	if err != nil {
+		return nil, err
+	}
+
+	return New(key, previousKeys...)
+}
+
+// Encrypt encrypts plaintext with the Cipher's injected current key.
+// @group Encryption
+// @behavior readonly
+func (c *Cipher) Encrypt(plaintext string) (string, error) {
+	if c == nil {
+		return "", errors.New("nil cipher")
+	}
+	return encryptWithKey(c.key, plaintext)
+}
+
+// Decrypt decrypts ciphertext with the current key, then any configured previous keys.
+// @group Encryption
+// @behavior readonly
+func (c *Cipher) Decrypt(encodedPayload string) (string, error) {
+	if c == nil {
+		return "", errors.New("nil cipher")
+	}
+	return decryptWithCandidateKeys(c.key, c.previousKeys, encodedPayload)
+}
+
 // GenerateAppKey generates a random base64 app key prefixed with "base64:".
 // @group Key management
 // @behavior readonly
@@ -194,7 +265,7 @@ func Encrypt(plaintext string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return encryptWithKey(key, plaintext)
+	return (&Cipher{key: key}).Encrypt(plaintext)
 }
 
 // Decrypt decrypts an encrypted payload using the APP_KEY from environment.
@@ -224,18 +295,16 @@ func Encrypt(plaintext string) (string, error) {
 //	// #string "rotated"
 //	// #error <nil>
 func Decrypt(encodedPayload string) (string, error) {
-	key, err := GetAppKey()
+	c, err := NewFromEnv()
 	if err != nil {
 		return "", err
 	}
+	return c.Decrypt(encodedPayload)
+}
 
-	previousKeys, err := GetPreviousAppKeys()
-	if err != nil {
-		return "", err
-	}
-
+func decryptWithCandidateKeys(currentKey []byte, previousKeys [][]byte, encodedPayload string) (string, error) {
 	keys := make([][]byte, 0, 1+len(previousKeys))
-	keys = append(keys, key)
+	keys = append(keys, currentKey)
 	keys = append(keys, previousKeys...)
 
 	var lastErr error
@@ -247,6 +316,13 @@ func Decrypt(encodedPayload string) (string, error) {
 		lastErr = decErr
 	}
 	return "", fmt.Errorf("failed to decrypt with current or previous keys: %w", lastErr)
+}
+
+func cloneAndValidateAESKey(key []byte) ([]byte, error) {
+	if len(key) != 16 && len(key) != 32 {
+		return nil, fmt.Errorf("key must be 16 or 32 bytes")
+	}
+	return append([]byte(nil), key...), nil
 }
 
 // encryptWithKey encrypts plaintext using the provided AES key (16 or 32 bytes).

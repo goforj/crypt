@@ -17,7 +17,6 @@ func main() {
 	_ = os.Setenv("APP_KEY", keyStr)
 	key, err := crypt.GetAppKey()
 	godump.Dump(len(key), err)
-
 	// #int 32
 	// #error <nil>
 }

@@ -19,7 +19,6 @@ func main() {
 	_ = os.Setenv("APP_PREVIOUS_KEYS", k1+", "+k2)
 	keys, err := crypt.GetPreviousAppKeys()
 	godump.Dump(len(keys), err)
-
 	// #int 2
 	// #error <nil>
 }

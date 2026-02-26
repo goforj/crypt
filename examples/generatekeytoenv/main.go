@@ -19,7 +19,6 @@ func main() {
 	tmp := filepath.Join(os.TempDir(), ".env")
 	key, err := crypt.GenerateKeyToEnv(tmp)
 	godump.Dump(err, key)
-
 	// #error <nil>
 	// #string "base64:..."
 }

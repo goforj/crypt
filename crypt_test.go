@@ -143,6 +143,87 @@ func TestEncryptAndDecrypt(t *testing.T) {
 	}
 }
 
+func TestNewCipherEncryptAndDecrypt(t *testing.T) {
+	currentKey, _ := generateKeyPair(t)
+	c, err := New(currentKey)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	encrypted, err := c.Encrypt("instance secret")
+	if err != nil {
+		t.Fatalf("Cipher.Encrypt failed: %v", err)
+	}
+	decrypted, err := c.Decrypt(encrypted)
+	if err != nil {
+		t.Fatalf("Cipher.Decrypt failed: %v", err)
+	}
+	if decrypted != "instance secret" {
+		t.Fatalf("unexpected decrypted value %q", decrypted)
+	}
+}
+
+func TestNewCopiesInjectedKeys(t *testing.T) {
+	currentKey, _ := generateKeyPair(t)
+	previousKey, _ := generateKeyPair(t)
+
+	oldCiphertext, err := encryptWithKey(previousKey, "rotated")
+	if err != nil {
+		t.Fatalf("encryptWithKey failed: %v", err)
+	}
+
+	c, err := New(currentKey, previousKey)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+
+	// Mutate caller-owned slices after construction; Cipher should have copied them.
+	currentKey[0] ^= 0xFF
+	previousKey[0] ^= 0xFF
+
+	if got, err := c.Decrypt(oldCiphertext); err != nil || got != "rotated" {
+		t.Fatalf("expected decrypt via copied previous key, got %q err %v", got, err)
+	}
+}
+
+func TestNewRejectsInvalidCurrentKey(t *testing.T) {
+	if _, err := New([]byte{1, 2, 3}); err == nil || !strings.Contains(err.Error(), "invalid current key") {
+		t.Fatalf("expected invalid current key error, got %v", err)
+	}
+}
+
+func TestNewRejectsInvalidPreviousKey(t *testing.T) {
+	currentKey, _ := generateKeyPair(t)
+	if _, err := New(currentKey, []byte{1, 2, 3}); err == nil || !strings.Contains(err.Error(), "invalid previous key") {
+		t.Fatalf("expected invalid previous key error, got %v", err)
+	}
+}
+
+func TestNewFromEnv(t *testing.T) {
+	_, currentKeyStr := generateKeyPair(t)
+	_, previousKeyStr := generateKeyPair(t)
+	t.Setenv("APP_KEY", currentKeyStr)
+	t.Setenv("APP_PREVIOUS_KEYS", previousKeyStr)
+
+	c, err := NewFromEnv()
+	if err != nil {
+		t.Fatalf("NewFromEnv failed: %v", err)
+	}
+	if c == nil {
+		t.Fatal("expected cipher")
+	}
+}
+
+func TestCipherNilReceiverErrors(t *testing.T) {
+	var c *Cipher
+	if _, err := c.Encrypt("x"); err == nil || !strings.Contains(err.Error(), "nil cipher") {
+		t.Fatalf("expected nil cipher error from Encrypt, got %v", err)
+	}
+	if _, err := c.Decrypt("x"); err == nil || !strings.Contains(err.Error(), "nil cipher") {
+		t.Fatalf("expected nil cipher error from Decrypt, got %v", err)
+	}
+}
+
 func TestDecryptTamperedPayloadFails(t *testing.T) {
 	setTestAppKey(t)
 
@@ -249,6 +330,24 @@ func TestDecryptFailsWhenNoKeysMatch(t *testing.T) {
 	}
 	if decrypted, err := Decrypt(ciphertext); err != nil || decrypted != "recoverable" {
 		t.Fatalf("Decrypt with current key failed, got %q and err %v", decrypted, err)
+	}
+}
+
+func TestCipherDecryptFailsWhenNoKeysMatch(t *testing.T) {
+	currentKey, _ := generateKeyPair(t)
+	wrongKey, _ := generateKeyPair(t)
+
+	ciphertext, err := encryptWithKey(wrongKey, "unrecoverable")
+	if err != nil {
+		t.Fatalf("encryptWithKey failed: %v", err)
+	}
+
+	c, err := New(currentKey)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	if _, err := c.Decrypt(ciphertext); err == nil {
+		t.Fatal("expected decrypt to fail when no keys match")
 	}
 }
 
