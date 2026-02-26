@@ -3,30 +3,31 @@
 </p>
 
 <p align="center">
-    Laravel-compatible symmetric encryption for Go - AES-128/256 CBC with HMAC, key rotation, and portable payloads.
+    Symmetric encryption for Go - AES-128/256 CBC with HMAC, key rotation, and portable payloads.
 </p>
 
 <p align="center">
     <a href="https://pkg.go.dev/github.com/goforj/crypt"><img src="https://pkg.go.dev/badge/github.com/goforj/crypt.svg" alt="Go Reference"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
     <a href="https://github.com/goforj/crypt/actions"><img src="https://github.com/goforj/crypt/actions/workflows/test.yml/badge.svg" alt="Go Test"></a>
-    <a href="https://golang.org"><img src="https://img.shields.io/badge/go-1.18+-blue?logo=go" alt="Go version"></a>
+    <a href="https://golang.org"><img src="https://img.shields.io/badge/go-1.24+-blue?logo=go" alt="Go version"></a>
     <img src="https://img.shields.io/github/v/tag/goforj/crypt?label=version&sort=semver" alt="Latest tag">
     <a href="https://codecov.io/gh/goforj/crypt" ><img src="https://codecov.io/github/goforj/crypt/graph/badge.svg?token=Z8NM86Q50C"/></a>
     <a href="https://goreportcard.com/report/github.com/goforj/crypt"><img src="https://goreportcard.com/badge/github.com/goforj/crypt" alt="Go Report Card"></a>
 </p>
 
 <p align="center">
-  <code>crypt</code> mirrors Laravel's encryption format so Go services can read and write the same ciphertext as PHP apps. It signs every payload with an HMAC and supports graceful key rotation via <code>APP_PREVIOUS_KEYS</code>.
+  <code>crypt</code> provides symmetric encryption for Go services with authenticated payloads (AES-CBC + HMAC) and key rotation via <code>APP_PREVIOUS_KEYS</code>. It also supports Laravel/PHP-compatible payloads for interoperability.
 </p>
 
 # Features
 
-- AES-128 / AES-256 encryption compatible with Laravel
+- AES-128 / AES-256 encryption (Laravel/PHP-compatible payload format)
 - Authenticated encryption (AES-CBC + HMAC)
 - Transparent key rotation via `APP_PREVIOUS_KEYS`
 - Zero dependencies (stdlib only)
 - Deterministic, testable API
+- Instanced and global usage styles
 - Safe defaults with explicit failure modes
 
 ## Install
@@ -36,6 +37,45 @@ go get github.com/goforj/crypt
 ```
 
 ## Quickstart
+
+### Instanced (recommended)
+
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/goforj/crypt"
+)
+
+func main() {
+	appKey := "base64:..." // 16-byte (AES-128) or 32-byte (AES-256) key after decoding.
+	key, err := crypt.ReadAppKey(appKey)
+	if err != nil {
+		panic(err)
+	}
+
+	c, err := crypt.New(key)
+	if err != nil {
+		panic(err)
+	}
+
+	ciphertext, err := c.Encrypt("secret")
+	if err != nil {
+		panic(err)
+	}
+
+	plaintext, err := c.Decrypt(ciphertext)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(plaintext) // "secret"
+}
+```
+
+### Global (env-based convenience)
 
 ```go
 package main
@@ -48,20 +88,10 @@ import (
 )
 
 func main() {
-	// Typical Laravel-style key: base64 + 32 bytes (AES-256) or 16 bytes (AES-128).
-	if err := os.Setenv("APP_KEY", "base64:..."); err != nil {
-		panic(err)
-	}
+	_ = os.Setenv("APP_KEY", "base64:...")
 
-	ciphertext, err := crypt.Encrypt("secret")
-	if err != nil {
-		panic(err)
-	}
-
-	plaintext, err := crypt.Decrypt(ciphertext)
-	if err != nil {
-		panic(err)
-	}
+	ciphertext, _ := crypt.Encrypt("secret")
+	plaintext, _ := crypt.Decrypt(ciphertext)
 
 	fmt.Println(plaintext) // "secret"
 }
@@ -69,7 +99,7 @@ func main() {
 
 ## Key format & rotation
 
-`crypt` follows Laravel’s key format and rotation model.
+`crypt` uses a base64-prefixed key format and supports key rotation. This matches Laravel/PHP conventions when interoperability is needed.
 
 * **`APP_KEY`** must be prefixed with `base64:` and decode to either **16 bytes (AES-128)** or **32 bytes (AES-256)**.
 * **`APP_PREVIOUS_KEYS`** is optional and may contain a comma-separated list of older keys in the same format.
@@ -83,34 +113,20 @@ export APP_KEY="base64:J63qRTDLub5NuZvP+kb8YIorGS6qFYHKVo6u7179stY="
 export APP_PREVIOUS_KEYS="base64:2nLsGFGzyoae2ax3EF2Lyq/hH6QghBGLIq5uL+Gp8/w="
 ```
 
-## CLI helpers
-
-Generate a Laravel-style key:
-
-```go
-k, _ := crypt.GenerateAppKey()
-fmt.Println(k) // base64:...
-```
-
-Parse an existing key string:
-
-```go
-keyBytes, err := crypt.ReadAppKey("base64:...") // len == 16 or 32
-```
-
 ## Runnable examples
 
 Every function has a corresponding runnable example under [`./examples`](./examples).
 
-These examples are **generated directly from the documentation blocks** of each function, ensuring the docs and code never drift. These are the same examples you see here in the README and GoDoc.
+Examples are generated directly from function doc comments, and the same snippets power the README and GoDoc examples.
 
-An automated test executes **every example** to verify it builds and runs successfully.
-
-This guarantees all examples are valid, up-to-date, and remain functional as the API evolves.
+An automated test builds every example so the docs stay valid as the API evolves.
 
 <!-- api:embed:start -->
 
 ## API Index
+
+Global = package-level functions (env-based convenience).
+Instanced = methods on `*crypt.Cipher` with injected keys.
 
 | Group | Namespace | Functions |
 |------:|-----------|-----------|
