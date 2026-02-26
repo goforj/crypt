@@ -14,22 +14,26 @@ func main() {
 	// Falls back to APP_PREVIOUS_KEYS when the current key cannot decrypt.
 
 	// Example: decrypt using current key
-	keyStr, _ := crypt.GenerateAppKey()
-	_ = os.Setenv("APP_KEY", keyStr)
-	c, _ := crypt.Encrypt("secret")
-	p, _ := crypt.Decrypt(c)
-	godump.Dump(p)
+	appKey, _ := crypt.GenerateAppKey()
+	_ = os.Setenv("APP_KEY", appKey)
+	ciphertext, _ := crypt.Encrypt("secret")
+	plaintext, _ := crypt.Decrypt(ciphertext)
+	godump.Dump(plaintext)
 	// #string "secret"
 
 	// Example: decrypt ciphertext encrypted with a previous key
-	oldKeyStr, _ := crypt.GenerateAppKey()
-	newKeyStr, _ := crypt.GenerateAppKey()
-	_ = os.Setenv("APP_KEY", oldKeyStr)
-	oldCipher, _ := crypt.Encrypt("rotated")
-	_ = os.Setenv("APP_KEY", newKeyStr)
-	_ = os.Setenv("APP_PREVIOUS_KEYS", oldKeyStr)
-	plain, err := crypt.Decrypt(oldCipher)
-	godump.Dump(plain, err)
+	oldAppKey, _ := crypt.GenerateAppKey()
+	newAppKey, _ := crypt.GenerateAppKey()
+
+	// Encrypt with the old key first.
+	_ = os.Setenv("APP_KEY", oldAppKey)
+	rotatedCiphertext, _ := crypt.Encrypt("rotated")
+
+	// Rotate to a new current key, but keep the old key in APP_PREVIOUS_KEYS.
+	_ = os.Setenv("APP_KEY", newAppKey)
+	_ = os.Setenv("APP_PREVIOUS_KEYS", oldAppKey)
+	plaintext, err := crypt.Decrypt(rotatedCiphertext)
+	godump.Dump(plaintext, err)
 	// #string "rotated"
 	// #error <nil>
 }

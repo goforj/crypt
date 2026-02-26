@@ -14,8 +14,8 @@ import (
 //
 // Example: generate and write APP_KEY to a temp .env
 //
-//	tmp := filepath.Join(os.TempDir(), ".env")
-//	key, err := crypt.GenerateKeyToEnv(tmp)
+//	envPath := filepath.Join(os.TempDir(), ".env")
+//	key, err := crypt.GenerateKeyToEnv(envPath)
 //	godump.Dump(err, key)
 //	// #error <nil>
 //	// #string "base64:..."
@@ -37,10 +37,11 @@ func GenerateKeyToEnv(envPath string) (string, error) {
 //
 // Example: rotate APP_KEY and prepend old key to APP_PREVIOUS_KEYS
 //
-//	tmp := filepath.Join(os.TempDir(), ".env")
-//	oldKey, _ := crypt.GenerateAppKey()
-//	_ = os.WriteFile(tmp, []byte("APP_KEY="+oldKey+"\n"), 0o644)
-//	newKey, err := crypt.RotateKeyInEnv(tmp)
+//	envPath := filepath.Join(os.TempDir(), ".env")
+//	currentKey, _ := crypt.GenerateAppKey()
+//	// Seed a minimal .env with an existing APP_KEY.
+//	_ = os.WriteFile(envPath, []byte("APP_KEY="+currentKey+"\n"), 0o644)
+//	newKey, err := crypt.RotateKeyInEnv(envPath)
 //	godump.Dump(err == nil, newKey != "")
 //	// #bool true
 //	// #bool true

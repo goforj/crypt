@@ -67,8 +67,6 @@ func main() {
 }
 ```
 
-Here’s a cleaner, tighter rewrite that keeps the same meaning but reads more confidently and fluently:
-
 ## Key format & rotation
 
 `crypt` follows Laravel’s key format and rotation model.
@@ -133,25 +131,29 @@ Falls back to APP_PREVIOUS_KEYS when the current key cannot decrypt.
 _Example: decrypt using current key_
 
 ```go
-keyStr, _ := crypt.GenerateAppKey()
-_ = os.Setenv("APP_KEY", keyStr)
-c, _ := crypt.Encrypt("secret")
-p, _ := crypt.Decrypt(c)
-godump.Dump(p)
+appKey, _ := crypt.GenerateAppKey()
+_ = os.Setenv("APP_KEY", appKey)
+ciphertext, _ := crypt.Encrypt("secret")
+plaintext, _ := crypt.Decrypt(ciphertext)
+godump.Dump(plaintext)
 // #string "secret"
 ```
 
 _Example: decrypt ciphertext encrypted with a previous key_
 
 ```go
-oldKeyStr, _ := crypt.GenerateAppKey()
-newKeyStr, _ := crypt.GenerateAppKey()
-_ = os.Setenv("APP_KEY", oldKeyStr)
-oldCipher, _ := crypt.Encrypt("rotated")
-_ = os.Setenv("APP_KEY", newKeyStr)
-_ = os.Setenv("APP_PREVIOUS_KEYS", oldKeyStr)
-plain, err := crypt.Decrypt(oldCipher)
-godump.Dump(plain, err)
+oldAppKey, _ := crypt.GenerateAppKey()
+newAppKey, _ := crypt.GenerateAppKey()
+
+// Encrypt with the old key first.
+_ = os.Setenv("APP_KEY", oldAppKey)
+rotatedCiphertext, _ := crypt.Encrypt("rotated")
+
+// Rotate to a new current key, but keep the old key in APP_PREVIOUS_KEYS.
+_ = os.Setenv("APP_KEY", newAppKey)
+_ = os.Setenv("APP_PREVIOUS_KEYS", oldAppKey)
+plaintext, err := crypt.Decrypt(rotatedCiphertext)
+godump.Dump(plaintext, err)
 // #string "rotated"
 // #error <nil>
 ```
@@ -161,8 +163,8 @@ godump.Dump(plain, err)
 Encrypt encrypts a plaintext using the APP_KEY from environment.
 
 ```go
-keyStr, _ := crypt.GenerateAppKey()
-_ = os.Setenv("APP_KEY", keyStr)
+appKey, _ := crypt.GenerateAppKey()
+_ = os.Setenv("APP_KEY", appKey)
 ciphertext, err := crypt.Encrypt("secret")
 godump.Dump(err == nil, ciphertext != "")
 // #bool true
@@ -200,8 +202,8 @@ It generates a new APP_KEY and writes it to the provided .env path.
 Other keys are preserved; APP_KEY is replaced/added.
 
 ```go
-tmp := filepath.Join(os.TempDir(), ".env")
-key, err := crypt.GenerateKeyToEnv(tmp)
+envPath := filepath.Join(os.TempDir(), ".env")
+key, err := crypt.GenerateKeyToEnv(envPath)
 godump.Dump(err, key)
 // #error <nil>
 // #string "base64:..."
@@ -212,8 +214,8 @@ godump.Dump(err, key)
 GetAppKey retrieves the APP_KEY from the environment and parses it.
 
 ```go
-keyStr, _ := crypt.GenerateAppKey()
-_ = os.Setenv("APP_KEY", keyStr)
+appKey, _ := crypt.GenerateAppKey()
+_ = os.Setenv("APP_KEY", appKey)
 key, err := crypt.GetAppKey()
 godump.Dump(len(key), err)
 // #int 32
@@ -226,9 +228,10 @@ GetPreviousAppKeys retrieves and parses APP_PREVIOUS_KEYS from the environment.
 Keys are expected to be comma-delimited and prefixed with "base64:".
 
 ```go
-k1, _ := crypt.GenerateAppKey()
-k2, _ := crypt.GenerateAppKey()
-_ = os.Setenv("APP_PREVIOUS_KEYS", k1+", "+k2)
+oldKeyA, _ := crypt.GenerateAppKey()
+oldKeyB, _ := crypt.GenerateAppKey()
+// APP_PREVIOUS_KEYS is a comma-separated list.
+_ = os.Setenv("APP_PREVIOUS_KEYS", oldKeyA+", "+oldKeyB)
 keys, err := crypt.GetPreviousAppKeys()
 godump.Dump(len(keys), err)
 // #int 2
@@ -250,15 +253,17 @@ ReadAppKey parses a base64 encoded app key with "base64:" prefix.
 Accepts 16-byte keys (AES-128) or 32-byte keys (AES-256) after decoding.
 
 ```go
-key128raw := make([]byte, 16)
-_, _ = rand.Read(key128raw)
-key128str := "base64:" + base64.StdEncoding.EncodeToString(key128raw)
+// Build a 16-byte (AES-128) key string manually.
+raw16 := make([]byte, 16)
+_, _ = rand.Read(raw16)
+key16 := "base64:" + base64.StdEncoding.EncodeToString(raw16)
 
-key256str, _ := crypt.GenerateAppKey()
+// Generate a 32-byte (AES-256) key string with the helper.
+key32, _ := crypt.GenerateAppKey()
 
-key128, _ := crypt.ReadAppKey(key128str)
-key256, _ := crypt.ReadAppKey(key256str)
-godump.Dump(len(key128), len(key256))
+parsed16, _ := crypt.ReadAppKey(key16)
+parsed32, _ := crypt.ReadAppKey(key32)
+godump.Dump(len(parsed16), len(parsed32))
 // #int 16
 // #int 32
 ```
@@ -269,10 +274,11 @@ RotateKeyInEnv mimics Laravel's key:rotate.
 It moves the current APP_KEY into APP_PREVIOUS_KEYS (prepended) and writes a new APP_KEY.
 
 ```go
-tmp := filepath.Join(os.TempDir(), ".env")
-oldKey, _ := crypt.GenerateAppKey()
-_ = os.WriteFile(tmp, []byte("APP_KEY="+oldKey+"\n"), 0o644)
-newKey, err := crypt.RotateKeyInEnv(tmp)
+envPath := filepath.Join(os.TempDir(), ".env")
+currentKey, _ := crypt.GenerateAppKey()
+// Seed a minimal .env with an existing APP_KEY.
+_ = os.WriteFile(envPath, []byte("APP_KEY="+currentKey+"\n"), 0o644)
+newKey, err := crypt.RotateKeyInEnv(envPath)
 godump.Dump(err == nil, newKey != "")
 // #bool true
 // #bool true

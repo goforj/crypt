@@ -15,15 +15,17 @@ func main() {
 	// Accepts 16-byte keys (AES-128) or 32-byte keys (AES-256) after decoding.
 
 	// Example: parse AES-128 and AES-256 keys
-	key128raw := make([]byte, 16)
-	_, _ = rand.Read(key128raw)
-	key128str := "base64:" + base64.StdEncoding.EncodeToString(key128raw)
+	// Build a 16-byte (AES-128) key string manually.
+	raw16 := make([]byte, 16)
+	_, _ = rand.Read(raw16)
+	key16 := "base64:" + base64.StdEncoding.EncodeToString(raw16)
 
-	key256str, _ := crypt.GenerateAppKey()
+	// Generate a 32-byte (AES-256) key string with the helper.
+	key32, _ := crypt.GenerateAppKey()
 
-	key128, _ := crypt.ReadAppKey(key128str)
-	key256, _ := crypt.ReadAppKey(key256str)
-	godump.Dump(len(key128), len(key256))
+	parsed16, _ := crypt.ReadAppKey(key16)
+	parsed32, _ := crypt.ReadAppKey(key32)
+	godump.Dump(len(parsed16), len(parsed32))
 	// #int 16
 	// #int 32
 }

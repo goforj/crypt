@@ -16,8 +16,8 @@ func main() {
 	// Other keys are preserved; APP_KEY is replaced/added.
 
 	// Example: generate and write APP_KEY to a temp .env
-	tmp := filepath.Join(os.TempDir(), ".env")
-	key, err := crypt.GenerateKeyToEnv(tmp)
+	envPath := filepath.Join(os.TempDir(), ".env")
+	key, err := crypt.GenerateKeyToEnv(envPath)
 	godump.Dump(err, key)
 	// #error <nil>
 	// #string "base64:..."

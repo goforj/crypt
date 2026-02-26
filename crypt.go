@@ -113,8 +113,8 @@ func GenerateAppKey() (string, error) {
 //
 // Example: read APP_KEY and ensure the correct size
 //
-//	keyStr, _ := crypt.GenerateAppKey()
-//	_ = os.Setenv("APP_KEY", keyStr)
+//	appKey, _ := crypt.GenerateAppKey()
+//	_ = os.Setenv("APP_KEY", appKey)
 //	key, err := crypt.GetAppKey()
 //	godump.Dump(len(key), err)
 //	// #int 32
@@ -134,9 +134,10 @@ func GetAppKey() ([]byte, error) {
 //
 // Example: parse two previous keys (mixed AES-128/256)
 //
-//	k1, _ := crypt.GenerateAppKey()
-//	k2, _ := crypt.GenerateAppKey()
-//	_ = os.Setenv("APP_PREVIOUS_KEYS", k1+", "+k2)
+//	oldKeyA, _ := crypt.GenerateAppKey()
+//	oldKeyB, _ := crypt.GenerateAppKey()
+//	// APP_PREVIOUS_KEYS is a comma-separated list.
+//	_ = os.Setenv("APP_PREVIOUS_KEYS", oldKeyA+", "+oldKeyB)
 //	keys, err := crypt.GetPreviousAppKeys()
 //	godump.Dump(len(keys), err)
 //	// #int 2
@@ -170,15 +171,17 @@ func GetPreviousAppKeys() ([][]byte, error) {
 //
 // Example: parse AES-128 and AES-256 keys
 //
-//	key128raw := make([]byte, 16)
-//	_, _ = rand.Read(key128raw)
-//	key128str := "base64:" + base64.StdEncoding.EncodeToString(key128raw)
+//	// Build a 16-byte (AES-128) key string manually.
+//	raw16 := make([]byte, 16)
+//	_, _ = rand.Read(raw16)
+//	key16 := "base64:" + base64.StdEncoding.EncodeToString(raw16)
 //
-//	key256str, _ := crypt.GenerateAppKey()
+//	// Generate a 32-byte (AES-256) key string with the helper.
+//	key32, _ := crypt.GenerateAppKey()
 //
-//	key128, _ := crypt.ReadAppKey(key128str)
-//	key256, _ := crypt.ReadAppKey(key256str)
-//	godump.Dump(len(key128), len(key256))
+//	parsed16, _ := crypt.ReadAppKey(key16)
+//	parsed32, _ := crypt.ReadAppKey(key32)
+//	godump.Dump(len(parsed16), len(parsed32))
 //	// #int 16
 //	// #int 32
 func ReadAppKey(key string) ([]byte, error) {
@@ -254,8 +257,8 @@ type EncryptedPayload struct {
 //
 // Example: encrypt with current APP_KEY
 //
-//	keyStr, _ := crypt.GenerateAppKey()
-//	_ = os.Setenv("APP_KEY", keyStr)
+//	appKey, _ := crypt.GenerateAppKey()
+//	_ = os.Setenv("APP_KEY", appKey)
 //	ciphertext, err := crypt.Encrypt("secret")
 //	godump.Dump(err == nil, ciphertext != "")
 //	// #bool true
@@ -275,23 +278,27 @@ func Encrypt(plaintext string) (string, error) {
 //
 // Example: decrypt using current key
 //
-//	keyStr, _ := crypt.GenerateAppKey()
-//	_ = os.Setenv("APP_KEY", keyStr)
-//	c, _ := crypt.Encrypt("secret")
-//	p, _ := crypt.Decrypt(c)
-//	godump.Dump(p)
+//	appKey, _ := crypt.GenerateAppKey()
+//	_ = os.Setenv("APP_KEY", appKey)
+//	ciphertext, _ := crypt.Encrypt("secret")
+//	plaintext, _ := crypt.Decrypt(ciphertext)
+//	godump.Dump(plaintext)
 //	// #string "secret"
 //
 // Example: decrypt ciphertext encrypted with a previous key
 //
-//	oldKeyStr, _ := crypt.GenerateAppKey()
-//	newKeyStr, _ := crypt.GenerateAppKey()
-//	_ = os.Setenv("APP_KEY", oldKeyStr)
-//	oldCipher, _ := crypt.Encrypt("rotated")
-//	_ = os.Setenv("APP_KEY", newKeyStr)
-//	_ = os.Setenv("APP_PREVIOUS_KEYS", oldKeyStr)
-//	plain, err := crypt.Decrypt(oldCipher)
-//	godump.Dump(plain, err)
+//	oldAppKey, _ := crypt.GenerateAppKey()
+//	newAppKey, _ := crypt.GenerateAppKey()
+//
+//	// Encrypt with the old key first.
+//	_ = os.Setenv("APP_KEY", oldAppKey)
+//	rotatedCiphertext, _ := crypt.Encrypt("rotated")
+//
+//	// Rotate to a new current key, but keep the old key in APP_PREVIOUS_KEYS.
+//	_ = os.Setenv("APP_KEY", newAppKey)
+//	_ = os.Setenv("APP_PREVIOUS_KEYS", oldAppKey)
+//	plaintext, err := crypt.Decrypt(rotatedCiphertext)
+//	godump.Dump(plaintext, err)
 //	// #string "rotated"
 //	// #error <nil>
 func Decrypt(encodedPayload string) (string, error) {
@@ -416,8 +423,8 @@ func decryptWithKey(key []byte, encodedPayload string) (string, error) {
 //
 // Example: produce deterministic MAC
 //
-//	m := crypt.computeHMACSHA256([]byte("msg"), []byte("key"))
-//	godump.Dump(len(m))
+//	mac := crypt.computeHMACSHA256([]byte("msg"), []byte("key"))
+//	godump.Dump(len(mac))
 //	// #int 32
 func computeHMACSHA256(data []byte, key []byte) []byte {
 	h := hmac.New(sha256.New, key)

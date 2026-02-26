@@ -13,8 +13,8 @@ func main() {
 	// Encrypt encrypts a plaintext using the APP_KEY from environment.
 
 	// Example: encrypt with current APP_KEY
-	keyStr, _ := crypt.GenerateAppKey()
-	_ = os.Setenv("APP_KEY", keyStr)
+	appKey, _ := crypt.GenerateAppKey()
+	_ = os.Setenv("APP_KEY", appKey)
 	ciphertext, err := crypt.Encrypt("secret")
 	godump.Dump(err == nil, ciphertext != "")
 	// #bool true
