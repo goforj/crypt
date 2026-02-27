@@ -131,7 +131,7 @@ An automated test builds every example so the docs stay valid as the API evolves
 
 <!-- api:embed:start -->
 
-## API Index
+## <a id="api-index"></a>API Index
 
 Global = package-level functions (env-based convenience).
 Instanced = methods on `*crypt.Cipher` with injected keys.

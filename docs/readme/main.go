@@ -357,7 +357,9 @@ func renderAPI(funcs []*FuncDoc) string {
 	var buf bytes.Buffer
 
 	// ---------------- Index ----------------
-	buf.WriteString("## API Index\n\n")
+	buf.WriteString("## <a id=\"api-index\"></a>API Index\n\n")
+	buf.WriteString("Global = package-level functions (env-based convenience).\n")
+	buf.WriteString("Instanced = methods on `*crypt.Cipher` with injected keys.\n\n")
 	buf.WriteString("| Group | Namespace | Functions |\n")
 	buf.WriteString("|------:|-----------|-----------|\n")
 
@@ -393,9 +395,6 @@ func renderAPI(funcs []*FuncDoc) string {
 
 			for _, fn := range byGroup[group][ns] {
 				header := displayName(fn)
-				if fn.Fluent == "true" {
-					header += " · fluent"
-				}
 
 				buf.WriteString(fmt.Sprintf("#### <a id=\"%s\"></a>%s\n\n", anchorID(fn), header))
 
