@@ -36,7 +36,7 @@ go get github.com/goforj/crypt
 
 ## Why crypt?
 
-`crypt` exists to solve one problem well: encrypting small application payloads with safe defaults and painless key rotation.
+**crypt** exists to solve one problem well: encrypting small application payloads with safe defaults and painless key rotation.
 
 It is not a general-purpose cryptography library.
 
