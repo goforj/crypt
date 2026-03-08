@@ -24,7 +24,7 @@ go get github.com/goforj/crypt
 
 # Features
 
-<code>crypt</code> provides symmetric encryption for Go services with authenticated payloads (AES-CBC + HMAC) and key rotation via <code>APP_PREVIOUS_KEYS</code>. It also supports Laravel/PHP-compatible payloads for interoperability.
+**crypt** provides symmetric encryption for Go services with authenticated payloads (AES-CBC + HMAC) and key rotation via **APP_PREVIOUS_KEYS**. It also supports Laravel/PHP-compatible payloads for interoperability.
 
 - AES-128 / AES-256 encryption (Laravel/PHP-compatible payload format)
 - Authenticated encryption (AES-CBC + HMAC)
