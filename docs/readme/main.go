@@ -376,7 +376,7 @@ func renderAPI(funcs []*FuncDoc) string {
 			buf.WriteString(fmt.Sprintf("| %s | %s | %s |\n",
 				"**"+group+"**",
 				namespaceLabel(ns),
-				strings.Join(links, " "),
+				strings.Join(links, " · "),
 			))
 		}
 	}

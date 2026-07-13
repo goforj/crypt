@@ -136,9 +136,9 @@ Instanced = methods on `*crypt.Cipher` with injected keys.
 
 | Group | Namespace | Functions |
 |------:|-----------|-----------|
-| **Encryption** | Global | [Decrypt](#decrypt) [Encrypt](#encrypt) |
-| **Encryption** | Instanced | [Cipher.Decrypt](#cipher-decrypt) [Cipher.Encrypt](#cipher-encrypt) |
-| **Key management** | Global | [GenerateAppKey](#generateappkey) [GenerateKeyToEnv](#generatekeytoenv) [GetAppKey](#getappkey) [GetPreviousAppKeys](#getpreviousappkeys) [New](#new) [NewFromEnv](#newfromenv) [ReadAppKey](#readappkey) [RotateKeyInEnv](#rotatekeyinenv) |
+| **Encryption** | Global | [Decrypt](#decrypt) · [Encrypt](#encrypt) |
+| **Encryption** | Instanced | [Cipher.Decrypt](#cipher-decrypt) · [Cipher.Encrypt](#cipher-encrypt) |
+| **Key management** | Global | [GenerateAppKey](#generateappkey) · [GenerateKeyToEnv](#generatekeytoenv) · [GetAppKey](#getappkey) · [GetPreviousAppKeys](#getpreviousappkeys) · [New](#new) · [NewFromEnv](#newfromenv) · [ReadAppKey](#readappkey) · [RotateKeyInEnv](#rotatekeyinenv) |
 
 
 ## Encryption
