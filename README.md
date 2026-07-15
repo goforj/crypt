@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-    Symmetric encryption for Go - AES-128/256 CBC with HMAC, key rotation, and portable payloads.
+    Authenticated AES-128/256 CBC for Go, with explicit Laravel interoperability and key rotation.
 </p>
 
 <p align="center">
@@ -24,15 +24,16 @@ go get github.com/goforj/crypt
 
 # Features
 
-**crypt** provides symmetric encryption for Go services with authenticated payloads (AES-CBC + HMAC) and key rotation via **APP_PREVIOUS_KEYS**. It also supports Laravel/PHP-compatible payloads for interoperability.
+**crypt** provides authenticated AES-CBC encryption for Go services and graceful key rotation through **APP_PREVIOUS_KEYS**. Existing APIs retain the package's original wire format; Laravel-compatible writes are an explicit opt-in.
 
-- AES-128 / AES-256 encryption (Laravel/PHP-compatible payload format)
+- AES-128 / AES-256 CBC encryption
 - Authenticated encryption (AES-CBC + HMAC)
+- Explicit Laravel 12 `encryptString` interoperability
+- Automatic reads of legacy and Laravel CBC payloads
 - Transparent key rotation via `APP_PREVIOUS_KEYS`
 - Zero dependencies (stdlib only)
-- Deterministic, testable API
 - Instanced and global usage styles
-- Safe defaults with explicit failure modes
+- Stable error identities for invalid keys, malformed payloads, and authentication failures
 
 ## Why crypt?
 
@@ -67,6 +68,7 @@ func main() {
 		panic(err)
 	}
 
+	// Encrypt preserves crypt's original wire format.
 	ciphertext, err := c.Encrypt("secret")
 	if err != nil {
 		panic(err)
@@ -80,6 +82,14 @@ func main() {
 	fmt.Println(plaintext) // "secret"
 }
 ```
+
+For ciphertext that Laravel can consume, make the write mode explicit:
+
+```go
+ciphertext, err := c.EncryptLaravel("secret")
+```
+
+`c.Decrypt` automatically reads both formats.
 
 ### Global (env-based convenience)
 
@@ -96,7 +106,7 @@ import (
 func main() {
 	_ = os.Setenv("APP_KEY", "base64:...")
 
-	ciphertext, _ := crypt.Encrypt("secret")
+	ciphertext, _ := crypt.EncryptLaravel("secret")
 	plaintext, _ := crypt.Decrypt(ciphertext)
 
 	fmt.Println(plaintext) // "secret"
@@ -105,7 +115,7 @@ func main() {
 
 ## Key format & rotation
 
-`crypt` uses a base64-prefixed key format and supports key rotation. This matches Laravel/PHP conventions when interoperability is needed.
+`crypt` uses Laravel's base64-prefixed key syntax and supports graceful decryption during rotation.
 
 * **`APP_KEY`** must be prefixed with `base64:` and decode to either **16 bytes (AES-128)** or **32 bytes (AES-256)**.
 * **`APP_PREVIOUS_KEYS`** is optional and may contain a comma-separated list of older keys in the same format.
@@ -119,9 +129,69 @@ export APP_KEY="base64:J63qRTDLub5NuZvP+kb8YIorGS6qFYHKVo6u7179stY="
 export APP_PREVIOUS_KEYS="base64:2nLsGFGzyoae2ax3EF2Lyq/hH6QghBGLIq5uL+Gp8/w="
 ```
 
+## Wire-format compatibility
+
+| Operation | crypt original format | Laravel 12 CBC `encryptString` |
+|---|---:|---:|
+| `Encrypt` / `(*Cipher).Encrypt` writes | Yes | No |
+| `EncryptLaravel` / `(*Cipher).EncryptLaravel` writes | No | Yes |
+| `Decrypt` / `(*Cipher).Decrypt` reads | Yes | Yes |
+
+The Laravel writer follows the official CBC envelope: outer-base64 JSON containing
+`iv`, `value`, lowercase hexadecimal `mac`, and an explicit empty `tag`. It signs
+the base64 IV and ciphertext strings, matching Laravel's
+[`Encrypter`](https://github.com/laravel/framework/blob/12.x/src/Illuminate/Encryption/Encrypter.php).
+A 16-byte key selects AES-128-CBC and a 32-byte key selects AES-256-CBC.
+
+Compatibility is intentionally limited to Laravel's string API. `crypt` does not
+produce or consume PHP-serialized values from Laravel's generic `encrypt` method,
+and it does not support Laravel's GCM ciphers. See Laravel's
+[encryption documentation](https://laravel.com/docs/12.x/encryption) for the upstream model.
+
+## Migrating writers safely
+
+Existing `Encrypt` calls and ciphertext remain unchanged. To adopt Laravel writes:
+
+1. Deploy this version everywhere values may be decrypted. Its readers accept both formats.
+2. Change only the intended writers to `EncryptLaravel`.
+3. Re-encrypt stored legacy values gradually if a Laravel-only consumer must read them.
+4. Keep required old keys in `APP_PREVIOUS_KEYS` until all ciphertext using them has expired or migrated.
+
+No flag silently changes existing writers. `EncryptedPayload` also retains its original
+three-field shape for source compatibility with keyed and unkeyed composite literals.
+
+## Security and error handling
+
+- A fresh cryptographic IV is generated for every write. Payloads are authenticated before CBC decryption or padding inspection.
+- `ErrInvalidKey`, `ErrInvalidPayload`, and `ErrAuthentication` support `errors.Is`; error text never includes key, plaintext, or ciphertext values.
+- The library deliberately imposes no arbitrary payload-size cap. Encryption buffers the payload in memory, so callers should apply limits appropriate to their trust boundary.
+- Treat `APP_KEY` and `APP_PREVIOUS_KEYS` as secrets. Do not log them, embed them in source, or remove a previous key while live ciphertext still depends on it.
+
+## Mutating `.env` files
+
+> **Warning:** `GenerateKeyToEnv` is a destructive reset. It replaces `APP_KEY` and
+> removes every active `APP_PREVIOUS_KEYS` assignment. Existing ciphertext may become
+> permanently unreadable. Use `RotateKeyInEnv` when retaining decryption history.
+
+Both helpers preserve comments, unrelated formatting, quote style, CRLF/LF endings,
+and an existing file's permission mode. New files are created with mode `0600`.
+Audit older files and restrict them to `0600` when deployment requirements allow;
+the library does not silently change an existing explicit mode. Replacement files
+remain `0600` while secret bytes are prepared, then receive the preserved final mode
+immediately before the synced rename.
+
+Writes use a synced same-directory temporary file and atomic rename. Final-component
+symlinks are rejected, and same-path mutations are serialized within one process.
+Unrelated processes must coordinate their read-modify-write operations separately.
+Atomic replacement creates an inode owned by the writing process, so run these helpers
+under the account that should own the resulting file. If rename commits but directory
+sync reports a durability error, the helper returns both the installed key and the error.
+
+Benchmarks for both formats are available with `go test -bench=. -benchmem`.
+
 ## Runnable examples
 
-Every function has a corresponding runnable example under [`./examples`](./examples).
+Runnable examples for the documented workflows live under [`./examples`](./examples).
 
 Examples are generated directly from function doc comments, and the same snippets power the README and GoDoc examples.
 
@@ -136,8 +206,8 @@ Instanced = methods on `*crypt.Cipher` with injected keys.
 
 | Group | Namespace | Functions |
 |------:|-----------|-----------|
-| **Encryption** | Global | [Decrypt](#decrypt) · [Encrypt](#encrypt) |
-| **Encryption** | Instanced | [Cipher.Decrypt](#cipher-decrypt) · [Cipher.Encrypt](#cipher-encrypt) |
+| **Encryption** | Global | [Decrypt](#decrypt) · [Encrypt](#encrypt) · [EncryptLaravel](#encryptlaravel) |
+| **Encryption** | Instanced | [Cipher.Decrypt](#cipher-decrypt) · [Cipher.Encrypt](#cipher-encrypt) · [Cipher.EncryptLaravel](#cipher-encryptlaravel) |
 | **Key management** | Global | [GenerateAppKey](#generateappkey) · [GenerateKeyToEnv](#generatekeytoenv) · [GetAppKey](#getappkey) · [GetPreviousAppKeys](#getpreviousappkeys) · [New](#new) · [NewFromEnv](#newfromenv) · [ReadAppKey](#readappkey) · [RotateKeyInEnv](#rotatekeyinenv) |
 
 
@@ -147,8 +217,7 @@ Instanced = methods on `*crypt.Cipher` with injected keys.
 
 #### <a id="decrypt"></a>Decrypt
 
-Decrypt decrypts an encrypted payload using the APP_KEY from environment.
-Falls back to APP_PREVIOUS_KEYS when the current key cannot decrypt.
+Decrypt decrypts either supported payload format using APP_KEY and APP_PREVIOUS_KEYS.
 
 _Example: decrypt using current key_
 
@@ -182,7 +251,8 @@ godump.Dump(plaintext, err)
 
 #### <a id="encrypt"></a>Encrypt
 
-Encrypt encrypts a plaintext using the APP_KEY from environment.
+Encrypt encrypts plaintext with APP_KEY in crypt's original payload format.
+Existing ciphertext writers retain their historical wire contract.
 
 ```go
 appKey, _ := crypt.GenerateAppKey()
@@ -193,15 +263,45 @@ godump.Dump(err == nil, ciphertext != "")
 // #bool true
 ```
 
+#### <a id="encryptlaravel"></a>EncryptLaravel
+
+EncryptLaravel encrypts plaintext with APP_KEY in Laravel's encryptString CBC format.
+This explicit opt-in avoids silently changing the existing Encrypt wire format.
+
+```go
+appKey, _ := crypt.GenerateAppKey()
+_ = os.Setenv("APP_KEY", appKey)
+ciphertext, err := crypt.EncryptLaravel("secret")
+godump.Dump(err == nil, ciphertext != "")
+// #bool true
+// #bool true
+```
+
 ### Instanced
 
 #### <a id="cipher-decrypt"></a>Cipher.Decrypt
 
-Decrypt decrypts ciphertext with the current key, then any configured previous keys.
+Decrypt decrypts either crypt's original format or Laravel's CBC encryptString format.
+It authenticates with the current key first, followed by configured previous keys.
 
 #### <a id="cipher-encrypt"></a>Cipher.Encrypt
 
-Encrypt encrypts plaintext with the Cipher's injected current key.
+Encrypt encrypts plaintext with the Cipher's current key in crypt's original format.
+Existing callers keep the same wire format; use EncryptLaravel for Laravel interoperability.
+
+#### <a id="cipher-encryptlaravel"></a>Cipher.EncryptLaravel
+
+EncryptLaravel encrypts plaintext with the Cipher's current key in Laravel's encryptString format.
+The result can be consumed by Laravel 12 AES-128-CBC or AES-256-CBC encrypters.
+
+```go
+key := make([]byte, 32)
+c, _ := crypt.New(key)
+ciphertext, err := c.EncryptLaravel("secret")
+godump.Dump(err == nil, ciphertext != "")
+// #bool true
+// #bool true
+```
 
 ## Key management
 
@@ -209,7 +309,7 @@ Encrypt encrypts plaintext with the Cipher's injected current key.
 
 #### <a id="generateappkey"></a>GenerateAppKey
 
-GenerateAppKey generates a random base64 app key prefixed with "base64:".
+GenerateAppKey generates a random AES-256 key using Laravel's base64-prefixed key syntax.
 
 ```go
 key, _ := crypt.GenerateAppKey()
@@ -219,12 +319,18 @@ godump.Dump(key)
 
 #### <a id="generatekeytoenv"></a>GenerateKeyToEnv
 
-GenerateKeyToEnv mimics Laravel's key:generate.
-It generates a new APP_KEY and writes it to the provided .env path.
-Other keys are preserved; APP_KEY is replaced/added.
+GenerateKeyToEnv creates a new APP_KEY and destructively clears APP_PREVIOUS_KEYS.
+
+This operation is a reset, not a graceful rotation. Existing ciphertext that
+requires a cleared previous key becomes unreadable; use RotateKeyInEnv to retain
+decryption history. New files use mode 0600, while existing file permissions are
+preserved. Final-component symlinks are rejected. If the atomic rename commits but
+syncing its directory fails, the installed key is returned together with the error.
 
 ```go
-envPath := filepath.Join(os.TempDir(), ".env")
+dir, _ := os.MkdirTemp("", "crypt-reset-*")
+defer os.RemoveAll(dir)
+envPath := filepath.Join(dir, ".env")
 key, err := crypt.GenerateKeyToEnv(envPath)
 godump.Dump(err, key)
 // #error <nil>
@@ -271,8 +377,7 @@ NewFromEnv constructs a Cipher from APP_KEY and APP_PREVIOUS_KEYS.
 
 #### <a id="readappkey"></a>ReadAppKey
 
-ReadAppKey parses a base64 encoded app key with "base64:" prefix.
-Accepts 16-byte keys (AES-128) or 32-byte keys (AES-256) after decoding.
+ReadAppKey parses a base64-prefixed AES-128 or AES-256 application key.
 
 ```go
 // Build a 16-byte (AES-128) key string manually.
@@ -292,14 +397,21 @@ godump.Dump(len(parsed16), len(parsed32))
 
 #### <a id="rotatekeyinenv"></a>RotateKeyInEnv
 
-RotateKeyInEnv mimics Laravel's key:rotate.
-It moves the current APP_KEY into APP_PREVIOUS_KEYS (prepended) and writes a new APP_KEY.
+RotateKeyInEnv writes a new APP_KEY and prepends the old key to APP_PREVIOUS_KEYS.
+
+Same-path calls are serialized within this process so concurrent rotations retain
+every key. Atomic replacement prevents partial files, but unrelated processes must
+still coordinate their read-modify-write operations with the caller. If the atomic
+rename commits but syncing its directory fails, the installed key is returned with
+the error so callers do not lose track of active key material.
 
 ```go
-envPath := filepath.Join(os.TempDir(), ".env")
+dir, _ := os.MkdirTemp("", "crypt-rotate-*")
+defer os.RemoveAll(dir)
+envPath := filepath.Join(dir, ".env")
 currentKey, _ := crypt.GenerateAppKey()
 // Seed a minimal .env with an existing APP_KEY.
-_ = os.WriteFile(envPath, []byte("APP_KEY="+currentKey+"\n"), 0o644)
+_ = os.WriteFile(envPath, []byte("APP_KEY="+currentKey+"\n"), 0o600)
 newKey, err := crypt.RotateKeyInEnv(envPath)
 godump.Dump(err == nil, newKey != "")
 // #bool true

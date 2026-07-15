@@ -13,13 +13,13 @@ import (
 
 // main keeps the generated API example executable so documentation drift fails during compilation.
 func main() {
-	// Encrypt encrypts plaintext with APP_KEY in crypt's original payload format.
-	// Existing ciphertext writers retain their historical wire contract.
+	// EncryptLaravel encrypts plaintext with APP_KEY in Laravel's encryptString CBC format.
+	// This explicit opt-in avoids silently changing the existing Encrypt wire format.
 
-	// Example: encrypt with current APP_KEY
+	// Example: emit a Laravel-compatible ciphertext from APP_KEY
 	appKey, _ := crypt.GenerateAppKey()
 	_ = os.Setenv("APP_KEY", appKey)
-	ciphertext, err := crypt.Encrypt("secret")
+	ciphertext, err := crypt.EncryptLaravel("secret")
 	godump.Dump(err == nil, ciphertext != "")
 	// #bool true
 	// #bool true

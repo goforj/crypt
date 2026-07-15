@@ -7,19 +7,17 @@ package main
 import (
 	"github.com/goforj/crypt"
 	"github.com/goforj/godump"
-
-	"os"
 )
 
 // main keeps the generated API example executable so documentation drift fails during compilation.
 func main() {
-	// Encrypt encrypts plaintext with APP_KEY in crypt's original payload format.
-	// Existing ciphertext writers retain their historical wire contract.
+	// EncryptLaravel encrypts plaintext with the Cipher's current key in Laravel's encryptString format.
+	// The result can be consumed by Laravel 12 AES-128-CBC or AES-256-CBC encrypters.
 
-	// Example: encrypt with current APP_KEY
-	appKey, _ := crypt.GenerateAppKey()
-	_ = os.Setenv("APP_KEY", appKey)
-	ciphertext, err := crypt.Encrypt("secret")
+	// Example: emit a Laravel-compatible ciphertext with an injected key
+	key := make([]byte, 32)
+	c, _ := crypt.New(key)
+	ciphertext, err := c.EncryptLaravel("secret")
 	godump.Dump(err == nil, ciphertext != "")
 	// #bool true
 	// #bool true

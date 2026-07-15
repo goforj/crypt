@@ -1,14 +1,17 @@
 //go:build ignore
 // +build ignore
 
+// Package main keeps a crypt API example runnable so documentation changes remain compile-checked.
 package main
 
 import (
 	"github.com/goforj/crypt"
 	"github.com/goforj/godump"
+
 	"os"
 )
 
+// main keeps the generated API example executable so documentation drift fails during compilation.
 func main() {
 	// GetPreviousAppKeys retrieves and parses APP_PREVIOUS_KEYS from the environment.
 	// Keys are expected to be comma-delimited and prefixed with "base64:".

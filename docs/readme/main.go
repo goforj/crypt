@@ -1,6 +1,7 @@
 //go:build ignore
 // +build ignore
 
+// Package main refreshes README API reference sections from Go documentation.
 package main
 
 import (
@@ -21,6 +22,7 @@ const (
 	apiEnd   = "<!-- api:embed:end -->"
 )
 
+// main regenerates the README API block and reports command-line failures.
 func main() {
 	if err := run(); err != nil {
 		fmt.Println("Error:", err)
@@ -29,6 +31,7 @@ func main() {
 	fmt.Println("✔ API section updated in README.md")
 }
 
+// run parses the package and replaces only the generated README section.
 func run() error {
 	root, err := findRoot()
 	if err != nil {
@@ -62,6 +65,7 @@ func run() error {
 // ------------------------------------------------------------
 //
 
+// FuncDoc contains the normalized API metadata used by the README renderer.
 type FuncDoc struct {
 	Key         string
 	Name        string
@@ -73,6 +77,7 @@ type FuncDoc struct {
 	Examples    []Example
 }
 
+// Example records a labeled source block and its source-order position.
 type Example struct {
 	Label string
 	Code  string
@@ -92,6 +97,7 @@ var (
 	exampleHeader  = regexp.MustCompile(`(?i)^\s*Example:\s*(.*)$`)
 )
 
+// parseFuncs extracts every documented exported package function and method.
 func parseFuncs(root string) ([]*FuncDoc, error) {
 	fset := token.NewFileSet()
 
@@ -126,7 +132,7 @@ func parseFuncs(root string) ([]*FuncDoc, error) {
 				continue
 			}
 
-			if !ast.IsExported(fn.Name.Name) {
+			if !isPublicAPI(fn) {
 				continue
 			}
 
@@ -160,6 +166,18 @@ func parseFuncs(root string) ([]*FuncDoc, error) {
 	return out, nil
 }
 
+// isPublicAPI excludes exported-looking methods whose receiver type is package-private.
+func isPublicAPI(fn *ast.FuncDecl) bool {
+	if !ast.IsExported(fn.Name.Name) {
+		return false
+	}
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return true
+	}
+	return ast.IsExported(receiverTypeName(fn.Recv.List[0].Type))
+}
+
+// extractGroup reads the optional API grouping annotation.
 func extractGroup(group *ast.CommentGroup) string {
 	for _, c := range group.List {
 		line := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
@@ -170,6 +188,7 @@ func extractGroup(group *ast.CommentGroup) string {
 	return "Other"
 }
 
+// extractBehavior reads the optional mutation-behavior annotation.
 func extractBehavior(group *ast.CommentGroup) string {
 	for _, c := range group.List {
 		line := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
@@ -180,6 +199,7 @@ func extractBehavior(group *ast.CommentGroup) string {
 	return ""
 }
 
+// extractFluent reads the optional fluent-API annotation.
 func extractFluent(group *ast.CommentGroup) string {
 	for _, c := range group.List {
 		line := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
@@ -190,6 +210,7 @@ func extractFluent(group *ast.CommentGroup) string {
 	return ""
 }
 
+// extractDescription excludes generator annotations and example blocks from prose.
 func extractDescription(group *ast.CommentGroup) string {
 	var lines []string
 
@@ -213,6 +234,7 @@ func extractDescription(group *ast.CommentGroup) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
+// extractExamples preserves source ordering across multiple labeled blocks.
 func extractExamples(fset *token.FileSet, fn *ast.FuncDecl) []Example {
 	var out []Example
 	var current []string
@@ -259,10 +281,12 @@ func extractExamples(fset *token.FileSet, fn *ast.FuncDecl) []Example {
 	return out
 }
 
+// funcKey prevents package functions and identically named methods from colliding.
 func funcKey(fn *ast.FuncDecl) string {
 	return inferNamespace(fn) + ":" + fn.Name.Name
 }
 
+// inferNamespace maps package functions and methods to stable reference sections.
 func inferNamespace(fn *ast.FuncDecl) string {
 	if fn.Recv == nil || len(fn.Recv.List) == 0 {
 		return "Package"
@@ -270,6 +294,7 @@ func inferNamespace(fn *ast.FuncDecl) string {
 	return receiverTypeName(fn.Recv.List[0].Type)
 }
 
+// receiverTypeName unwraps pointer, generic, and selector receiver syntax.
 func receiverTypeName(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.Ident:
@@ -338,6 +363,7 @@ func selectPackage(pkgs map[string]*ast.Package) (string, error) {
 // ------------------------------------------------------------
 //
 
+// renderAPI produces a stable index and grouped reference from normalized metadata.
 func renderAPI(funcs []*FuncDoc) string {
 	byGroup := map[string]map[string][]*FuncDoc{}
 
@@ -418,6 +444,7 @@ func renderAPI(funcs []*FuncDoc) string {
 	return strings.TrimRight(buf.String(), "\n")
 }
 
+// sortedNamespaces keeps global and instance APIs ahead of any future receiver types.
 func sortedNamespaces(byNamespace map[string][]*FuncDoc) []string {
 	names := make([]string, 0, len(byNamespace))
 	for ns := range byNamespace {
@@ -430,6 +457,7 @@ func sortedNamespaces(byNamespace map[string][]*FuncDoc) []string {
 	return names
 }
 
+// namespaceSortRank encodes the reader-facing namespace order.
 func namespaceSortRank(ns string) int {
 	switch ns {
 	case "Package":
@@ -441,6 +469,7 @@ func namespaceSortRank(ns string) int {
 	}
 }
 
+// namespaceLabel translates AST namespaces into README terminology.
 func namespaceLabel(ns string) string {
 	switch ns {
 	case "Package":
@@ -452,6 +481,7 @@ func namespaceLabel(ns string) string {
 	}
 }
 
+// sortFuncs makes generated output independent of map and file traversal order.
 func sortFuncs(funcs []*FuncDoc) {
 	sort.Slice(funcs, func(i, j int) bool {
 		if funcs[i].Name == funcs[j].Name {
@@ -461,6 +491,7 @@ func sortFuncs(funcs []*FuncDoc) {
 	})
 }
 
+// displayName qualifies methods while leaving package functions concise.
 func displayName(fd *FuncDoc) string {
 	if fd.Namespace == "Package" {
 		return fd.Name
@@ -468,6 +499,7 @@ func displayName(fd *FuncDoc) string {
 	return fd.Namespace + "." + fd.Name
 }
 
+// anchorID mirrors display names in stable lowercase link targets.
 func anchorID(fd *FuncDoc) string {
 	if fd.Namespace == "Package" {
 		return strings.ToLower(fd.Name)
@@ -481,6 +513,7 @@ func anchorID(fd *FuncDoc) string {
 // ------------------------------------------------------------
 //
 
+// replaceAPISection confines generation to the explicit README marker pair.
 func replaceAPISection(readme, api string) (string, error) {
 	start := strings.Index(readme, apiStart)
 	end := strings.Index(readme, apiEnd)
@@ -505,6 +538,7 @@ func replaceAPISection(readme, api string) (string, error) {
 // ------------------------------------------------------------
 //
 
+// findRoot supports running the generator from the repository root or tool directory.
 func findRoot() (string, error) {
 	wd, _ := os.Getwd()
 	if fileExists(filepath.Join(wd, "go.mod")) {
@@ -517,11 +551,13 @@ func findRoot() (string, error) {
 	return "", fmt.Errorf("could not find project root")
 }
 
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
+// fileExists keeps root discovery focused on the expected module marker.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
 	return err == nil
 }
 
+// normalizeIndent removes shared doc-comment indentation without flattening source structure.
 func normalizeIndent(lines []string) []string {
 	min := -1
 
