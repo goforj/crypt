@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,15 +17,67 @@ import (
 	"strings"
 )
 
-var jsonMarshal = json.Marshal
+// ErrInvalidKey indicates that a key is missing, malformed, or has an unsupported length.
+var ErrInvalidKey = errors.New("crypt: invalid key")
 
-// Cipher provides instance-based encryption/decryption with injected keys.
-// It is safe to construct in DI containers and avoids relying on process-global env state.
+// ErrInvalidPayload indicates that a ciphertext envelope is malformed or cannot be safely decrypted.
+var ErrInvalidPayload = errors.New("crypt: invalid payload")
+
+// ErrAuthentication indicates that no configured key authenticated a well-formed ciphertext.
+var ErrAuthentication = errors.New("crypt: authentication failed")
+
+var errNilCipher = errors.New("crypt: nil cipher")
+
+type payloadFormat uint8
+
+const (
+	payloadFormatBase64MAC payloadFormat = iota
+	payloadFormatHexMAC
+)
+
+// Cipher provides instance-based encryption and decryption with injected keys.
+// Its key material is copied during construction, and a Cipher is safe for concurrent use.
 // @group Encryption
 // @behavior readonly
 type Cipher struct {
 	key          []byte
 	previousKeys [][]byte
+}
+
+// EncryptedPayload describes crypt's historical base64-MAC ciphertext envelope.
+//
+// This type intentionally retains its original three-field shape so code using unkeyed
+// composite literals remains source compatible. Alternate envelopes are parsed internally.
+type EncryptedPayload struct {
+	IV    string `json:"iv"`
+	Value string `json:"value"`
+	MAC   string `json:"mac"`
+}
+
+// encryptedPayloadEnvelope accepts both supported CBC envelopes without changing EncryptedPayload.
+type encryptedPayloadEnvelope struct {
+	IV    string          `json:"iv"`
+	Value string          `json:"value"`
+	MAC   string          `json:"mac"`
+	Tag   json.RawMessage `json:"tag"`
+}
+
+// hexMACEncryptedPayload preserves the current envelope's field order and explicit empty CBC tag.
+type hexMACEncryptedPayload struct {
+	IV    string `json:"iv"`
+	Value string `json:"value"`
+	MAC   string `json:"mac"`
+	Tag   string `json:"tag"`
+}
+
+// parsedEncryptedPayload holds the one-time validated envelope shared by all key attempts.
+type parsedEncryptedPayload struct {
+	format       payloadFormat
+	iv           []byte
+	ciphertext   []byte
+	mac          []byte
+	encodedIV    string
+	encodedValue string
 }
 
 // New constructs a Cipher with an injected current key and optional previous keys.
@@ -37,18 +90,18 @@ func New(key []byte, previousKeys ...[]byte) (*Cipher, error) {
 		return nil, fmt.Errorf("invalid current key: %w", err)
 	}
 
-	prev := make([][]byte, 0, len(previousKeys))
-	for i, k := range previousKeys {
-		cloned, err := cloneAndValidateAESKey(k)
+	previous := make([][]byte, 0, len(previousKeys))
+	for index, key := range previousKeys {
+		cloned, err := cloneAndValidateAESKey(key)
 		if err != nil {
-			return nil, fmt.Errorf("invalid previous key at index %d: %w", i, err)
+			return nil, fmt.Errorf("invalid previous key at index %d: %w", index, err)
 		}
-		prev = append(prev, cloned)
+		previous = append(previous, cloned)
 	}
 
 	return &Cipher{
 		key:          current,
-		previousKeys: prev,
+		previousKeys: previous,
 	}, nil
 }
 
@@ -69,27 +122,38 @@ func NewFromEnv() (*Cipher, error) {
 	return New(key, previousKeys...)
 }
 
-// Encrypt encrypts plaintext with the Cipher's injected current key.
+// Encrypt encrypts plaintext with the Cipher's current key using the hex-MAC CBC envelope.
+// The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
 // @group Encryption
 // @behavior readonly
+//
+// Example: encrypt with an injected key
+//
+//	key := make([]byte, 32)
+//	c, _ := crypt.New(key)
+//	ciphertext, err := c.Encrypt("secret")
+//	godump.Dump(err == nil, ciphertext != "")
+//	// #bool true
+//	// #bool true
 func (c *Cipher) Encrypt(plaintext string) (string, error) {
 	if c == nil {
-		return "", errors.New("nil cipher")
+		return "", errNilCipher
 	}
 	return encryptWithKey(c.key, plaintext)
 }
 
-// Decrypt decrypts ciphertext with the current key, then any configured previous keys.
+// Decrypt decrypts current and historical CBC envelopes.
+// It authenticates with the current key first, followed by configured previous keys.
 // @group Encryption
 // @behavior readonly
 func (c *Cipher) Decrypt(encodedPayload string) (string, error) {
 	if c == nil {
-		return "", errors.New("nil cipher")
+		return "", errNilCipher
 	}
 	return decryptWithCandidateKeys(c.key, c.previousKeys, encodedPayload)
 }
 
-// GenerateAppKey generates a random base64 app key prefixed with "base64:".
+// GenerateAppKey generates a random AES-256 key using the base64-prefixed APP_KEY syntax.
 // @group Key management
 // @behavior readonly
 //
@@ -99,12 +163,7 @@ func (c *Cipher) Decrypt(encodedPayload string) (string, error) {
 //	godump.Dump(key)
 //	// #string "base64:..."
 func GenerateAppKey() (string, error) {
-	key := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, key); err != nil {
-		return "", err
-	}
-	encoded := base64.StdEncoding.EncodeToString(key)
-	return "base64:" + encoded, nil
+	return generateAppKey(rand.Reader)
 }
 
 // GetAppKey retrieves the APP_KEY from the environment and parses it.
@@ -122,7 +181,7 @@ func GenerateAppKey() (string, error) {
 func GetAppKey() ([]byte, error) {
 	key := os.Getenv("APP_KEY")
 	if key == "" {
-		return nil, errors.New("APP_KEY is not set in environment")
+		return nil, fmt.Errorf("%w: APP_KEY is not set", ErrInvalidKey)
 	}
 	return ReadAppKey(key)
 }
@@ -164,8 +223,7 @@ func GetPreviousAppKeys() ([][]byte, error) {
 	return keys, nil
 }
 
-// ReadAppKey parses a base64 encoded app key with "base64:" prefix.
-// Accepts 16-byte keys (AES-128) or 32-byte keys (AES-256) after decoding.
+// ReadAppKey parses a base64-prefixed AES-128 or AES-256 application key.
 // @group Key management
 // @behavior readonly
 //
@@ -186,72 +244,22 @@ func GetPreviousAppKeys() ([][]byte, error) {
 //	// #int 32
 func ReadAppKey(key string) ([]byte, error) {
 	const prefix = "base64:"
-	if len(key) < len(prefix) || key[:len(prefix)] != prefix {
-		return nil, fmt.Errorf("unsupported or missing key prefix")
+	if !strings.HasPrefix(key, prefix) {
+		return nil, fmt.Errorf("%w: unsupported or missing key prefix", ErrInvalidKey)
 	}
-	decoded, err := base64.StdEncoding.DecodeString(key[len(prefix):])
+
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(key, prefix))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: malformed base64", ErrInvalidKey)
 	}
-	if len(decoded) != 32 && len(decoded) != 16 {
-		return nil, fmt.Errorf("key must be 16 or 32 bytes after decoding")
+	if len(decoded) != 16 && len(decoded) != 32 {
+		return nil, fmt.Errorf("%w: key must decode to 16 or 32 bytes", ErrInvalidKey)
 	}
 	return decoded, nil
 }
 
-// pkcs7Pad pads data to a multiple of blockSize using PKCS#7 semantics.
-// @group Padding
-// @behavior pure
-//
-// Example: pad short block
-//
-//	p := crypt.pkcs7Pad([]byte("abc"), 4)
-//	godump.Dump(p)
-//	// #[]uint8 [
-//	//   0 => 97 #uint8
-//	//   1 => 98 #uint8
-//	//   2 => 99 #uint8
-//	//   3 => 1  #uint8
-//	// ]
-func pkcs7Pad(data []byte, blockSize int) []byte {
-	padding := blockSize - len(data)%blockSize
-	padText := bytes.Repeat([]byte{byte(padding)}, padding)
-	return append(data, padText...)
-}
-
-// pkcs7Unpad removes PKCS#7 padding from data.
-// @group Padding
-// @behavior readonly
-//
-// Example: unpad valid data
-//
-//	out, _ := crypt.pkcs7Unpad([]byte{97, 98, 99, 1})
-//	godump.Dump(string(out))
-//	// #string "abc"
-func pkcs7Unpad(data []byte) ([]byte, error) {
-	if len(data) == 0 {
-		return nil, errors.New("invalid padding size")
-	}
-	padding := data[len(data)-1]
-	if int(padding) > len(data) || padding == 0 {
-		return nil, errors.New("invalid padding")
-	}
-	for _, b := range data[len(data)-int(padding):] {
-		if b != padding {
-			return nil, errors.New("invalid padding")
-		}
-	}
-	return data[:len(data)-int(padding)], nil
-}
-
-// EncryptedPayload is the JSON structure wrapped in base64 used for ciphertext.
-type EncryptedPayload struct {
-	IV    string `json:"iv"`
-	Value string `json:"value"`
-	MAC   string `json:"mac"`
-}
-
-// Encrypt encrypts a plaintext using the APP_KEY from environment.
+// Encrypt encrypts plaintext with APP_KEY using the hex-MAC CBC envelope.
+// The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
 // @group Encryption
 // @behavior readonly
 //
@@ -268,11 +276,10 @@ func Encrypt(plaintext string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return (&Cipher{key: key}).Encrypt(plaintext)
+	return encryptWithKey(key, plaintext)
 }
 
-// Decrypt decrypts an encrypted payload using the APP_KEY from environment.
-// Falls back to APP_PREVIOUS_KEYS when the current key cannot decrypt.
+// Decrypt decrypts either supported payload format using APP_KEY and APP_PREVIOUS_KEYS.
 // @group Encryption
 // @behavior readonly
 //
@@ -302,137 +309,253 @@ func Encrypt(plaintext string) (string, error) {
 //	// #string "rotated"
 //	// #error <nil>
 func Decrypt(encodedPayload string) (string, error) {
-	c, err := NewFromEnv()
+	cipher, err := NewFromEnv()
 	if err != nil {
 		return "", err
 	}
-	return c.Decrypt(encodedPayload)
+	return cipher.Decrypt(encodedPayload)
 }
 
-func decryptWithCandidateKeys(currentKey []byte, previousKeys [][]byte, encodedPayload string) (string, error) {
-	keys := make([][]byte, 0, 1+len(previousKeys))
-	keys = append(keys, currentKey)
-	keys = append(keys, previousKeys...)
-
-	var lastErr error
-	for _, k := range keys {
-		plain, decErr := decryptWithKey(k, encodedPayload)
-		if decErr == nil {
-			return plain, nil
-		}
-		lastErr = decErr
+// generateAppKey isolates entropy injection so error paths are tested without mutable globals.
+func generateAppKey(random io.Reader) (string, error) {
+	key := make([]byte, 32)
+	if _, err := io.ReadFull(random, key); err != nil {
+		return "", fmt.Errorf("generate application key: %w", err)
 	}
-	return "", fmt.Errorf("failed to decrypt with current or previous keys: %w", lastErr)
+	return "base64:" + base64.StdEncoding.EncodeToString(key), nil
 }
 
+// cloneAndValidateAESKey prevents caller mutations from changing a constructed Cipher.
 func cloneAndValidateAESKey(key []byte) ([]byte, error) {
-	if len(key) != 16 && len(key) != 32 {
-		return nil, fmt.Errorf("key must be 16 or 32 bytes")
+	if err := validateAESKey(key); err != nil {
+		return nil, err
 	}
 	return append([]byte(nil), key...), nil
 }
 
-// encryptWithKey encrypts plaintext using the provided AES key (16 or 32 bytes).
-// Intended for internal use; prefer Encrypt for env-driven keys.
-// @group Encryption
-// @behavior readonly
+// validateAESKey rejects zero-value and manually assembled Cipher key states deterministically.
+func validateAESKey(key []byte) error {
+	if len(key) != 16 && len(key) != 32 {
+		return fmt.Errorf("%w: key must be 16 or 32 bytes", ErrInvalidKey)
+	}
+	return nil
+}
+
+// pkcs7Pad always adds padding so a block-aligned plaintext remains unambiguous.
+func pkcs7Pad(data []byte, blockSize int) []byte {
+	padding := blockSize - len(data)%blockSize
+	return append(data, bytes.Repeat([]byte{byte(padding)}, padding)...)
+}
+
+// pkcs7Unpad rejects every malformed padding shape before returning plaintext bytes.
+func pkcs7Unpad(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("%w: empty padded plaintext", ErrInvalidPayload)
+	}
+	padding := data[len(data)-1]
+	if padding == 0 || int(padding) > len(data) {
+		return nil, fmt.Errorf("%w: invalid padding", ErrInvalidPayload)
+	}
+	for _, value := range data[len(data)-int(padding):] {
+		if value != padding {
+			return nil, fmt.Errorf("%w: invalid padding", ErrInvalidPayload)
+		}
+	}
+	return data[:len(data)-int(padding)], nil
+}
+
+// encryptWithKey emits the current hex-MAC CBC envelope.
 func encryptWithKey(key []byte, plaintext string) (string, error) {
+	return encryptWithKeyAndReader(key, plaintext, rand.Reader)
+}
+
+// encryptWithKeyAndReader accepts an entropy source so exact wire fixtures remain reproducible.
+func encryptWithKeyAndReader(key []byte, plaintext string, random io.Reader) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: key must be 16 or 32 bytes", ErrInvalidKey)
 	}
 
 	iv := make([]byte, aes.BlockSize)
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-		return "", err
+	if _, err := io.ReadFull(random, iv); err != nil {
+		return "", fmt.Errorf("generate initialization vector: %w", err)
 	}
 
 	padded := pkcs7Pad([]byte(plaintext), aes.BlockSize)
 	ciphertext := make([]byte, len(padded))
-	mode := cipher.NewCBCEncrypter(block, iv)
-	mode.CryptBlocks(ciphertext, padded)
+	cipher.NewCBCEncrypter(block, iv).CryptBlocks(ciphertext, padded)
 
-	ivB64 := base64.StdEncoding.EncodeToString(iv)
-	valB64 := base64.StdEncoding.EncodeToString(ciphertext)
-	mac := computeHMACSHA256(append(iv, ciphertext...), key)
-	macB64 := base64.StdEncoding.EncodeToString(mac)
+	encodedIV := base64.StdEncoding.EncodeToString(iv)
+	encodedValue := base64.StdEncoding.EncodeToString(ciphertext)
 
-	payload := EncryptedPayload{IV: ivB64, Value: valB64, MAC: macB64}
-	jsonData, err := jsonMarshal(payload)
+	mac := computeHMACSHA256([]byte(encodedIV+encodedValue), key)
+	payload := hexMACEncryptedPayload{
+		IV:    encodedIV,
+		Value: encodedValue,
+		MAC:   hex.EncodeToString(mac),
+		Tag:   "",
+	}
+	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("encode encrypted payload: %w", err)
 	}
 	return base64.StdEncoding.EncodeToString(jsonData), nil
 }
 
-// decryptWithKey attempts to decrypt an encoded payload using the provided AES key.
-// Intended for internal use; prefer Decrypt for env-driven keys and rotation.
-// @group Encryption
-// @behavior readonly
+// decryptWithCandidateKeys parses once so malformed envelopes do not create key-loop-dependent errors.
+func decryptWithCandidateKeys(currentKey []byte, previousKeys [][]byte, encodedPayload string) (string, error) {
+	if err := validateAESKey(currentKey); err != nil {
+		return "", fmt.Errorf("invalid current key: %w", err)
+	}
+	for index, key := range previousKeys {
+		if err := validateAESKey(key); err != nil {
+			return "", fmt.Errorf("invalid previous key at index %d: %w", index, err)
+		}
+	}
+
+	payload, err := parseEncryptedPayload(encodedPayload)
+	if err != nil {
+		return "", err
+	}
+
+	keys := make([][]byte, 0, 1+len(previousKeys))
+	keys = append(keys, currentKey)
+	keys = append(keys, previousKeys...)
+	for _, key := range keys {
+		if !payload.authenticates(key) {
+			continue
+		}
+		return decryptAuthenticatedPayload(key, payload)
+	}
+	return "", ErrAuthentication
+}
+
+// decryptWithKey retains the historical helper while using the total shared parser.
 func decryptWithKey(key []byte, encodedPayload string) (string, error) {
+	return decryptWithCandidateKeys(key, nil, encodedPayload)
+}
+
+// parseEncryptedPayload validates all envelope structure before any key is attempted.
+func parseEncryptedPayload(encodedPayload string) (parsedEncryptedPayload, error) {
 	jsonBytes, err := base64.StdEncoding.DecodeString(encodedPayload)
 	if err != nil {
-		return "", fmt.Errorf("base64 decode failed: %w", err)
+		return parsedEncryptedPayload{}, fmt.Errorf("%w: malformed outer base64", ErrInvalidPayload)
 	}
 
-	var payload EncryptedPayload
-	if err := json.Unmarshal(jsonBytes, &payload); err != nil {
-		return "", fmt.Errorf("json decode failed: %w", err)
+	var envelope encryptedPayloadEnvelope
+	if err := json.Unmarshal(jsonBytes, &envelope); err != nil {
+		return parsedEncryptedPayload{}, fmt.Errorf("%w: malformed JSON envelope", ErrInvalidPayload)
+	}
+	if err := validateCBCTag(envelope.Tag); err != nil {
+		return parsedEncryptedPayload{}, err
 	}
 
-	iv, err := base64.StdEncoding.DecodeString(payload.IV)
+	iv, err := base64.StdEncoding.DecodeString(envelope.IV)
+	if err != nil || len(iv) != aes.BlockSize {
+		return parsedEncryptedPayload{}, fmt.Errorf("%w: IV must be base64 for 16 bytes", ErrInvalidPayload)
+	}
+	ciphertext, err := base64.StdEncoding.DecodeString(envelope.Value)
+	if err != nil || len(ciphertext) == 0 || len(ciphertext)%aes.BlockSize != 0 {
+		return parsedEncryptedPayload{}, fmt.Errorf("%w: ciphertext must be non-empty base64 for complete AES blocks", ErrInvalidPayload)
+	}
+
+	format, mac, err := parsePayloadMAC(envelope.MAC)
 	if err != nil {
-		return "", fmt.Errorf("iv decode failed: %w", err)
+		return parsedEncryptedPayload{}, err
 	}
-	ciphertext, err := base64.StdEncoding.DecodeString(payload.Value)
-	if err != nil {
-		return "", fmt.Errorf("value decode failed: %w", err)
-	}
-	mac, err := base64.StdEncoding.DecodeString(payload.MAC)
-	if err != nil {
-		return "", fmt.Errorf("mac decode failed: %w", err)
+	return parsedEncryptedPayload{
+		format:       format,
+		iv:           iv,
+		ciphertext:   ciphertext,
+		mac:          mac,
+		encodedIV:    envelope.IV,
+		encodedValue: envelope.Value,
+	}, nil
+}
+
+// validateCBCTag accepts empty or omitted CBC tags but rejects AEAD data under CBC.
+func validateCBCTag(raw json.RawMessage) error {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
 	}
 
-	expectedMAC := computeHMACSHA256(append(iv, ciphertext...), key)
-	if !hmac.Equal(expectedMAC, mac) {
-		return "", errors.New("HMAC validation failed")
+	var tag string
+	if err := json.Unmarshal(trimmed, &tag); err != nil {
+		return fmt.Errorf("%w: CBC tag must be a string", ErrInvalidPayload)
+	}
+	if tag != "" {
+		return fmt.Errorf("%w: CBC payloads cannot contain an authentication tag", ErrInvalidPayload)
+	}
+	return nil
+}
+
+// parsePayloadMAC identifies formats only from each format's canonical, non-overlapping MAC shape.
+func parsePayloadMAC(encodedMAC string) (payloadFormat, []byte, error) {
+	if len(encodedMAC) == sha256.Size*2 && isLowerHex(encodedMAC) {
+		mac, err := hex.DecodeString(encodedMAC)
+		if err == nil {
+			return payloadFormatHexMAC, mac, nil
+		}
 	}
 
+	mac, err := base64.StdEncoding.Strict().DecodeString(encodedMAC)
+	if err == nil && len(mac) == sha256.Size && base64.StdEncoding.EncodeToString(mac) == encodedMAC {
+		return payloadFormatBase64MAC, mac, nil
+	}
+	return 0, nil, fmt.Errorf("%w: MAC has an unsupported encoding", ErrInvalidPayload)
+}
+
+// isLowerHex enforces canonical lowercase hexadecimal MAC output rather than accepting ambiguous variants.
+func isLowerHex(value string) bool {
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// authenticates checks the selected format's exact signed byte sequence in constant time.
+func (p parsedEncryptedPayload) authenticates(key []byte) bool {
+	var expected []byte
+	switch p.format {
+	case payloadFormatBase64MAC:
+		expected = computeHMACSHA256Parts(key, p.iv, p.ciphertext)
+	case payloadFormatHexMAC:
+		expected = computeHMACSHA256([]byte(p.encodedIV+p.encodedValue), key)
+	default:
+		return false
+	}
+	return hmac.Equal(expected, p.mac)
+}
+
+// decryptAuthenticatedPayload performs CBC only after length checks and successful authentication.
+func decryptAuthenticatedPayload(key []byte, payload parsedEncryptedPayload) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", err
-	}
-	if len(ciphertext)%aes.BlockSize != 0 {
-		return "", errors.New("ciphertext is not a multiple of the block size")
+		return "", fmt.Errorf("%w: key must be 16 or 32 bytes", ErrInvalidKey)
 	}
 
-	mode := cipher.NewCBCDecrypter(block, iv)
-	mode.CryptBlocks(ciphertext, ciphertext)
-
-	unpadded, err := pkcs7Unpad(ciphertext)
+	plaintext := append([]byte(nil), payload.ciphertext...)
+	cipher.NewCBCDecrypter(block, payload.iv).CryptBlocks(plaintext, plaintext)
+	unpadded, err := pkcs7Unpad(plaintext)
 	if err != nil {
 		return "", err
 	}
-
 	return string(unpadded), nil
 }
 
-// computeHMACSHA256 computes HMAC-SHA256 over data with the given key.
-// @group MAC
-// @behavior pure
-//
-// Example: produce deterministic MAC
-//
-//	mac := crypt.computeHMACSHA256([]byte("msg"), []byte("key"))
-//	godump.Dump(len(mac))
-//	// #int 32
+// computeHMACSHA256 computes HMAC-SHA256 over one byte slice.
 func computeHMACSHA256(data []byte, key []byte) []byte {
-	h := hmac.New(sha256.New, key)
-	h.Write(data)
-	return h.Sum(nil)
+	return computeHMACSHA256Parts(key, data)
 }
 
-// dumpExample is a no-op wrapper referenced by tests to preserve doc example coverage hooks.
-func dumpExample(values ...interface{}) {
-	_ = values
+// computeHMACSHA256Parts avoids temporary concatenation while preserving byte-for-byte MAC input.
+func computeHMACSHA256Parts(key []byte, parts ...[]byte) []byte {
+	hash := hmac.New(sha256.New, key)
+	for _, part := range parts {
+		_, _ = hash.Write(part)
+	}
+	return hash.Sum(nil)
 }

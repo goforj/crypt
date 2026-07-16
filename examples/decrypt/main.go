@@ -1,17 +1,19 @@
 //go:build ignore
 // +build ignore
 
+// Package main keeps a crypt API example runnable so documentation changes remain compile-checked.
 package main
 
 import (
 	"github.com/goforj/crypt"
 	"github.com/goforj/godump"
+
 	"os"
 )
 
+// main keeps the generated API example executable so documentation drift fails during compilation.
 func main() {
-	// Decrypt decrypts an encrypted payload using the APP_KEY from environment.
-	// Falls back to APP_PREVIOUS_KEYS when the current key cannot decrypt.
+	// Decrypt decrypts either supported payload format using APP_KEY and APP_PREVIOUS_KEYS.
 
 	// Example: decrypt using current key
 	appKey, _ := crypt.GenerateAppKey()

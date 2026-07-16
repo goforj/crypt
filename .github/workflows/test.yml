@@ -2,13 +2,70 @@ name: Go Test
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-  test:
+  quality:
+    name: Quality, race, and generated docs
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up stable Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Verify tidy modules
+        run: |
+          go mod tidy
+          (cd examples && go mod tidy)
+          git diff --exit-code -- go.mod go.sum examples/go.mod examples/go.sum
+          test -z "$(git status --porcelain --untracked-files=all -- go.mod go.sum examples/go.mod examples/go.sum)"
+
+      - name: Verify generated documentation
+        run: |
+          go run ./docs/examplegen/main.go
+          go run ./docs/readme/main.go
+          git diff --exit-code -- README.md examples
+          test -z "$(git status --porcelain --untracked-files=all -- README.md examples)"
+
+      - name: Vet root and examples
+        run: |
+          go vet ./...
+          (cd examples && go vet ./...)
+
+      - name: Test root with race and coverage
+        run: go test -race -covermode=atomic -coverprofile=coverage.txt ./...
+
+      - name: Test generated examples with race
+        working-directory: examples
+        run: go test -race ./...
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.txt
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  compatibility:
+    name: Go ${{ matrix.go-version }} / ${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ["1.24.4", stable]
+        goarch: [amd64, "386"]
 
     steps:
       - name: Checkout
@@ -17,26 +74,20 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "stable"
+          go-version: ${{ matrix.go-version }}
 
-      - name: Install dependencies
-        run: go mod tidy
-
-      - name: Run tests
-        run: go test ./... -v
-
-      - name: Install example dependencies
-        working-directory: examples
-        run: go mod tidy
-
-      - name: Run example compile tests
-        working-directory: examples
-        run: go test -v
-
-      - name: Run tests with coverage
-        run: go test -coverprofile=coverage.txt
-
-      - name: Upload results to Codecov
-        uses: codecov/codecov-action@v5
+      - name: Vet root and examples
         env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          CGO_ENABLED: 0
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go vet ./...
+          (cd examples && go vet ./...)
+
+      - name: Test root and examples
+        env:
+          CGO_ENABLED: 0
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go test ./...
+          (cd examples && go test ./...)

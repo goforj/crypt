@@ -1,3 +1,4 @@
+// Package examples verifies every generated program remains buildable.
 package examples
 
 import (
@@ -5,15 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	_ "github.com/goforj/crypt"
-	_ "github.com/goforj/godump"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	_ "github.com/goforj/crypt"
+	_ "github.com/goforj/godump"
 )
 
+// TestExamplesBuild removes build constraints through overlays and compiles every generated program.
 func TestExamplesBuild(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -39,14 +42,16 @@ func TestExamplesBuild(t *testing.T) {
 	}
 }
 
-func abs(p string) string {
-	a, err := filepath.Abs(p)
+// abs converts overlay paths to the absolute form required by the Go command.
+func abs(path string) string {
+	absolute, err := filepath.Abs(path)
 	if err != nil {
 		panic(err)
 	}
-	return a
+	return absolute
 }
 
+// buildExampleWithoutTags uses an overlay so validation never mutates generated source.
 func buildExampleWithoutTags(exampleDir string) error {
 	orig := filepath.Join(exampleDir, "main.go")
 
@@ -101,6 +106,7 @@ func buildExampleWithoutTags(exampleDir string) error {
 	return nil
 }
 
+// stripBuildTags removes only the leading constraint block used to keep examples out of module builds.
 func stripBuildTags(src []byte) []byte {
 	lines := strings.Split(string(src), "\n")
 

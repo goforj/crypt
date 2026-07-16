@@ -1,6 +1,7 @@
 //go:build ignore
 // +build ignore
 
+// Package main generates runnable examples from the crypt package's API comments.
 package main
 
 import (
@@ -16,6 +17,7 @@ import (
 	"strings"
 )
 
+// main generates examples and reports a concise failure to command-line callers.
 func main() {
 	if err := run(); err != nil {
 		fmt.Println("Error:", err)
@@ -24,6 +26,7 @@ func main() {
 	fmt.Println("✔ Examples generated in ./examples/")
 }
 
+// run discovers the module and renders every documented exported example.
 func run() error {
 	root, err := findRoot()
 	if err != nil {
@@ -88,6 +91,7 @@ func run() error {
 	return nil
 }
 
+// findRoot supports running the generator from either the repository root or this tool directory.
 func findRoot() (string, error) {
 	wd, _ := os.Getwd()
 	if fileExists(filepath.Join(wd, "go.mod")) {
@@ -100,8 +104,13 @@ func findRoot() (string, error) {
 	return "", fmt.Errorf("could not find project root")
 }
 
-func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+// fileExists keeps root discovery focused on the expected module marker.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
 
+// modulePath reads the canonical import path used by generated programs.
 func modulePath(root string) (string, error) {
 	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
@@ -124,6 +133,7 @@ func modulePath(root string) (string, error) {
 // ------------------------------------------------------------
 //
 
+// FuncDoc contains the API metadata needed to render one example program.
 type FuncDoc struct {
 	Key         string
 	Name        string
@@ -133,6 +143,7 @@ type FuncDoc struct {
 	Examples    []Example
 }
 
+// Example records one labeled source block and its deterministic ordering position.
 type Example struct {
 	FuncName string
 	File     string
@@ -155,6 +166,7 @@ type docLine struct {
 	pos  token.Pos
 }
 
+// extractFuncDocs extracts exported functions with their descriptions and examples.
 func extractFuncDocs(
 	fset *token.FileSet,
 	filename string,
@@ -170,7 +182,7 @@ func extractFuncDocs(
 		}
 
 		name := fn.Name.Name
-		if !ast.IsExported(name) {
+		if !isPublicAPI(fn) {
 			continue
 		}
 
@@ -187,10 +199,23 @@ func extractFuncDocs(
 	return out
 }
 
+// isPublicAPI excludes exported-looking methods whose receiver type is package-private.
+func isPublicAPI(fn *ast.FuncDecl) bool {
+	if !ast.IsExported(fn.Name.Name) {
+		return false
+	}
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return true
+	}
+	return ast.IsExported(receiverTypeName(fn.Recv.List[0].Type))
+}
+
+// funcKey prevents package functions and identically named methods from colliding.
 func funcKey(fn *ast.FuncDecl) string {
 	return inferNamespace(fn) + ":" + fn.Name.Name
 }
 
+// inferNamespace maps package functions and methods to stable documentation namespaces.
 func inferNamespace(fn *ast.FuncDecl) string {
 	if fn.Recv == nil || len(fn.Recv.List) == 0 {
 		return "Package"
@@ -198,6 +223,7 @@ func inferNamespace(fn *ast.FuncDecl) string {
 	return receiverTypeName(fn.Recv.List[0].Type)
 }
 
+// receiverTypeName unwraps receiver syntax without assuming a concrete generic form.
 func receiverTypeName(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.Ident:
@@ -215,6 +241,7 @@ func receiverTypeName(expr ast.Expr) string {
 	}
 }
 
+// extractGroup reads the optional documentation grouping annotation.
 func extractGroup(group *ast.CommentGroup) string {
 	lines := docLines(group)
 
@@ -228,6 +255,7 @@ func extractGroup(group *ast.CommentGroup) string {
 	return "Other"
 }
 
+// extractFuncDescription stops before generator-only annotations and example blocks.
 func extractFuncDescription(group *ast.CommentGroup) string {
 	lines := docLines(group)
 	var desc []string
@@ -254,6 +282,7 @@ func extractFuncDescription(group *ast.CommentGroup) string {
 	return strings.Join(desc, "\n")
 }
 
+// docLines retains source positions so examples with the same function remain ordered.
 func docLines(group *ast.CommentGroup) []docLine {
 	var lines []docLine
 
@@ -278,6 +307,7 @@ func docLines(group *ast.CommentGroup) []docLine {
 	return lines
 }
 
+// extractBlocks collects each Example section without interpreting its Go source.
 func extractBlocks(
 	fset *token.FileSet,
 	filename, funcName string,
@@ -384,6 +414,7 @@ func selectPackage(pkgs map[string]*ast.Package) (string, error) {
 // ------------------------------------------------------------
 //
 
+// writeMain emits one deterministic build-ignored executable for an API function or method.
 func writeMain(base string, fd *FuncDoc, importPath string) error {
 	if len(fd.Examples) == 0 {
 		return nil
@@ -404,6 +435,7 @@ func writeMain(base string, fd *FuncDoc, importPath string) error {
 	buf.WriteString("//go:build ignore\n")
 	buf.WriteString("// +build ignore\n\n")
 
+	buf.WriteString("// Package main keeps a crypt API example runnable so documentation changes remain compile-checked.\n")
 	buf.WriteString("package main\n\n")
 
 	imports := map[string]bool{
@@ -447,17 +479,25 @@ func writeMain(base string, fd *FuncDoc, importPath string) error {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		for _, imp := range keys {
+		for index, imp := range keys {
+			if index > 0 && isThirdPartyImport(imp) != isThirdPartyImport(keys[index-1]) {
+				buf.WriteString("\n")
+			}
 			buf.WriteString("\t\"" + imp + "\"\n")
 		}
 		buf.WriteString(")\n\n")
 	}
 
+	buf.WriteString("// main keeps the generated API example executable so documentation drift fails during compilation.\n")
 	buf.WriteString("func main() {\n")
 
 	// Description
 	if fd.Description != "" {
 		for _, line := range strings.Split(fd.Description, "\n") {
+			if strings.TrimSpace(line) == "" {
+				buf.WriteString("\n")
+				continue
+			}
 			buf.WriteString("\t// " + line + "\n")
 		}
 		buf.WriteString("\n")
@@ -485,6 +525,13 @@ func writeMain(base string, fd *FuncDoc, importPath string) error {
 	return os.WriteFile(filepath.Join(dir, "main.go"), buf.Bytes(), 0o644)
 }
 
+// isThirdPartyImport separates module dependencies from Go standard-library imports.
+func isThirdPartyImport(importPath string) bool {
+	firstSegment, _, _ := strings.Cut(importPath, "/")
+	return strings.Contains(firstSegment, ".")
+}
+
+// exampleDirName includes method namespaces so package and instance APIs remain distinct.
 func exampleDirName(fd *FuncDoc) string {
 	if fd.Namespace == "Package" {
 		return strings.ToLower(fd.Name)

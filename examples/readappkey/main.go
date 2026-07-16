@@ -1,18 +1,20 @@
 //go:build ignore
 // +build ignore
 
+// Package main keeps a crypt API example runnable so documentation changes remain compile-checked.
 package main
 
 import (
 	"crypto/rand"
 	"encoding/base64"
+
 	"github.com/goforj/crypt"
 	"github.com/goforj/godump"
 )
 
+// main keeps the generated API example executable so documentation drift fails during compilation.
 func main() {
-	// ReadAppKey parses a base64 encoded app key with "base64:" prefix.
-	// Accepts 16-byte keys (AES-128) or 32-byte keys (AES-256) after decoding.
+	// ReadAppKey parses a base64-prefixed AES-128 or AES-256 application key.
 
 	// Example: parse AES-128 and AES-256 keys
 	// Build a 16-byte (AES-128) key string manually.
