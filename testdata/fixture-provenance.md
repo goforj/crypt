@@ -6,7 +6,7 @@ The vectors in `crypt_test.go` use these fixed inputs:
 - AES-128 key: `000102030405060708090a0b0c0d0e0f`
 - AES-256 key: `000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f`
 
-The interoperability vectors were derived independently from the Go implementation
+The hex-MAC vectors were derived independently from the Go implementation
 with `OpenSSL 3.0.13 30 Jan 2024`. The initial set was generated on 2026-07-15;
 the neutral-text vectors were regenerated on 2026-07-16. PHP and the Laravel
 runtime were not available in the validation environment. For each plaintext and
@@ -44,5 +44,5 @@ MAC with the following raw-byte pipeline, encode it as base64, and omit `tag`:
   openssl base64 -A
 ```
 
-They freeze the wire format emitted by this package before the interoperability writer
-was introduced.
+They freeze the wire format emitted by this package before `Encrypt` switched to
+the hex-MAC envelope.

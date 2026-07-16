@@ -31,8 +31,8 @@ var errNilCipher = errors.New("crypt: nil cipher")
 type payloadFormat uint8
 
 const (
-	payloadFormatLegacy payloadFormat = iota
-	payloadFormatInterop
+	payloadFormatBase64MAC payloadFormat = iota
+	payloadFormatHexMAC
 )
 
 // Cipher provides instance-based encryption and decryption with injected keys.
@@ -44,7 +44,7 @@ type Cipher struct {
 	previousKeys [][]byte
 }
 
-// EncryptedPayload describes the original crypt ciphertext envelope.
+// EncryptedPayload describes crypt's historical base64-MAC ciphertext envelope.
 //
 // This type intentionally retains its original three-field shape so code using unkeyed
 // composite literals remains source compatible. Alternate envelopes are parsed internally.
@@ -62,8 +62,8 @@ type encryptedPayloadEnvelope struct {
 	Tag   json.RawMessage `json:"tag"`
 }
 
-// interopEncryptedPayload preserves the interoperability envelope's field order and explicit empty CBC tag.
-type interopEncryptedPayload struct {
+// hexMACEncryptedPayload preserves the current envelope's field order and explicit empty CBC tag.
+type hexMACEncryptedPayload struct {
 	IV    string `json:"iv"`
 	Value string `json:"value"`
 	MAC   string `json:"mac"`
@@ -122,10 +122,19 @@ func NewFromEnv() (*Cipher, error) {
 	return New(key, previousKeys...)
 }
 
-// Encrypt encrypts plaintext with the Cipher's current key in crypt's original format.
-// Existing callers keep the same wire format; use EncryptForInterop when an external consumer requires the alternate envelope.
+// Encrypt encrypts plaintext with the Cipher's current key using the hex-MAC CBC envelope.
+// The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
 // @group Encryption
 // @behavior readonly
+//
+// Example: encrypt with an injected key
+//
+//	key := make([]byte, 32)
+//	c, _ := crypt.New(key)
+//	ciphertext, err := c.Encrypt("secret")
+//	godump.Dump(err == nil, ciphertext != "")
+//	// #bool true
+//	// #bool true
 func (c *Cipher) Encrypt(plaintext string) (string, error) {
 	if c == nil {
 		return "", errNilCipher
@@ -133,28 +142,7 @@ func (c *Cipher) Encrypt(plaintext string) (string, error) {
 	return encryptWithKey(c.key, plaintext)
 }
 
-// EncryptForInterop encrypts plaintext with the Cipher's current key using the interoperability CBC envelope.
-// The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
-// This explicit opt-in leaves Encrypt's established wire format unchanged.
-// @group Encryption
-// @behavior readonly
-//
-// Example: emit an interoperability ciphertext with an injected key
-//
-//	key := make([]byte, 32)
-//	c, _ := crypt.New(key)
-//	ciphertext, err := c.EncryptForInterop("secret")
-//	godump.Dump(err == nil, ciphertext != "")
-//	// #bool true
-//	// #bool true
-func (c *Cipher) EncryptForInterop(plaintext string) (string, error) {
-	if c == nil {
-		return "", errNilCipher
-	}
-	return encryptForInteropWithKey(c.key, plaintext)
-}
-
-// Decrypt decrypts either supported CBC envelope.
+// Decrypt decrypts current and historical CBC envelopes.
 // It authenticates with the current key first, followed by configured previous keys.
 // @group Encryption
 // @behavior readonly
@@ -270,8 +258,8 @@ func ReadAppKey(key string) ([]byte, error) {
 	return decoded, nil
 }
 
-// Encrypt encrypts plaintext with APP_KEY in crypt's original payload format.
-// Existing ciphertext writers retain their historical wire contract.
+// Encrypt encrypts plaintext with APP_KEY using the hex-MAC CBC envelope.
+// The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
 // @group Encryption
 // @behavior readonly
 //
@@ -289,28 +277,6 @@ func Encrypt(plaintext string) (string, error) {
 		return "", err
 	}
 	return encryptWithKey(key, plaintext)
-}
-
-// EncryptForInterop encrypts plaintext with APP_KEY using the interoperability CBC envelope.
-// The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
-// This explicit opt-in avoids silently changing the existing Encrypt wire format.
-// @group Encryption
-// @behavior readonly
-//
-// Example: emit an interoperability ciphertext from APP_KEY
-//
-//	appKey, _ := crypt.GenerateAppKey()
-//	_ = os.Setenv("APP_KEY", appKey)
-//	ciphertext, err := crypt.EncryptForInterop("secret")
-//	godump.Dump(err == nil, ciphertext != "")
-//	// #bool true
-//	// #bool true
-func EncryptForInterop(plaintext string) (string, error) {
-	key, err := GetAppKey()
-	if err != nil {
-		return "", err
-	}
-	return encryptForInteropWithKey(key, plaintext)
 }
 
 // Decrypt decrypts either supported payload format using APP_KEY and APP_PREVIOUS_KEYS.
@@ -398,18 +364,13 @@ func pkcs7Unpad(data []byte) ([]byte, error) {
 	return data[:len(data)-int(padding)], nil
 }
 
-// encryptWithKey preserves the historical private helper and legacy wire format.
+// encryptWithKey emits the current hex-MAC CBC envelope.
 func encryptWithKey(key []byte, plaintext string) (string, error) {
-	return encryptWithKeyAndReader(key, plaintext, payloadFormatLegacy, rand.Reader)
+	return encryptWithKeyAndReader(key, plaintext, rand.Reader)
 }
 
-// encryptForInteropWithKey emits the alternate CBC envelope with a lowercase hexadecimal MAC and explicit empty tag.
-func encryptForInteropWithKey(key []byte, plaintext string) (string, error) {
-	return encryptWithKeyAndReader(key, plaintext, payloadFormatInterop, rand.Reader)
-}
-
-// encryptWithKeyAndReader shares AES-CBC construction while keeping each format's MAC contract distinct.
-func encryptWithKeyAndReader(key []byte, plaintext string, format payloadFormat, random io.Reader) (string, error) {
+// encryptWithKeyAndReader accepts an entropy source so exact wire fixtures remain reproducible.
+func encryptWithKeyAndReader(key []byte, plaintext string, random io.Reader) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", fmt.Errorf("%w: key must be 16 or 32 bytes", ErrInvalidKey)
@@ -427,28 +388,14 @@ func encryptWithKeyAndReader(key []byte, plaintext string, format payloadFormat,
 	encodedIV := base64.StdEncoding.EncodeToString(iv)
 	encodedValue := base64.StdEncoding.EncodeToString(ciphertext)
 
-	var jsonData []byte
-	switch format {
-	case payloadFormatLegacy:
-		mac := computeHMACSHA256Parts(key, iv, ciphertext)
-		payload := EncryptedPayload{
-			IV:    encodedIV,
-			Value: encodedValue,
-			MAC:   base64.StdEncoding.EncodeToString(mac),
-		}
-		jsonData, err = json.Marshal(payload)
-	case payloadFormatInterop:
-		mac := computeHMACSHA256([]byte(encodedIV+encodedValue), key)
-		payload := interopEncryptedPayload{
-			IV:    encodedIV,
-			Value: encodedValue,
-			MAC:   hex.EncodeToString(mac),
-			Tag:   "",
-		}
-		jsonData, err = json.Marshal(payload)
-	default:
-		return "", fmt.Errorf("%w: unsupported payload format", ErrInvalidPayload)
+	mac := computeHMACSHA256([]byte(encodedIV+encodedValue), key)
+	payload := hexMACEncryptedPayload{
+		IV:    encodedIV,
+		Value: encodedValue,
+		MAC:   hex.EncodeToString(mac),
+		Tag:   "",
 	}
+	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("encode encrypted payload: %w", err)
 	}
@@ -548,13 +495,13 @@ func parsePayloadMAC(encodedMAC string) (payloadFormat, []byte, error) {
 	if len(encodedMAC) == sha256.Size*2 && isLowerHex(encodedMAC) {
 		mac, err := hex.DecodeString(encodedMAC)
 		if err == nil {
-			return payloadFormatInterop, mac, nil
+			return payloadFormatHexMAC, mac, nil
 		}
 	}
 
 	mac, err := base64.StdEncoding.Strict().DecodeString(encodedMAC)
 	if err == nil && len(mac) == sha256.Size && base64.StdEncoding.EncodeToString(mac) == encodedMAC {
-		return payloadFormatLegacy, mac, nil
+		return payloadFormatBase64MAC, mac, nil
 	}
 	return 0, nil, fmt.Errorf("%w: MAC has an unsupported encoding", ErrInvalidPayload)
 }
@@ -573,9 +520,9 @@ func isLowerHex(value string) bool {
 func (p parsedEncryptedPayload) authenticates(key []byte) bool {
 	var expected []byte
 	switch p.format {
-	case payloadFormatLegacy:
+	case payloadFormatBase64MAC:
 		expected = computeHMACSHA256Parts(key, p.iv, p.ciphertext)
-	case payloadFormatInterop:
+	case payloadFormatHexMAC:
 		expected = computeHMACSHA256([]byte(p.encodedIV+p.encodedValue), key)
 	default:
 		return false

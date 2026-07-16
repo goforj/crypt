@@ -20,23 +20,23 @@ const (
 	key256Hex    = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 )
 
-// interopFixture records independently derived CBC interoperability vectors.
-type interopFixture struct {
+// hexMACFixture records independently derived vectors for the current CBC envelope.
+type hexMACFixture struct {
 	name       string
 	keyHex     string
 	plaintext  string
 	ciphertext string
 }
 
-// legacyFixture freezes ciphertext written by crypt's original payload contract.
-type legacyFixture struct {
+// base64MACFixture freezes ciphertext written by crypt's original payload contract.
+type base64MACFixture struct {
 	name       string
 	keyHex     string
 	plaintext  string
 	ciphertext string
 }
 
-var interopFixtures = []interopFixture{
+var hexMACFixtures = []hexMACFixture{
 	{
 		name:       "aes128_empty",
 		keyHex:     key128Hex,
@@ -46,8 +46,8 @@ var interopFixtures = []interopFixture{
 	{
 		name:       "aes128_normal",
 		keyHex:     key128Hex,
-		plaintext:  "Hello, interop!",
-		ciphertext: "eyJpdiI6IkVCRVNFeFFWRmhjWUdSb2JIQjBlSHc9PSIsInZhbHVlIjoibzM5Q090VDZBMkhRRkFXN3E4SGtRUT09IiwibWFjIjoiYzk0MWRiYTIzZjJlZTBiMDc1OTJjY2YyZTk2YTJmNmNmNWQ0M2FkN2JiYjM1ZjBhOTc4YjhjZTA3MmNmMWU4NSIsInRhZyI6IiJ9",
+		plaintext:  "Hello, CBC!",
+		ciphertext: "eyJpdiI6IkVCRVNFeFFWRmhjWUdSb2JIQjBlSHc9PSIsInZhbHVlIjoidG9tYi9DNllkSUVIYkdCME9lWS9hQT09IiwibWFjIjoiNzZjNTIyODI5MmY3NTEwY2I5MDcxYTNhYmNkODE2MWRmZWNhMjllMzY1YTUwZDdjMDYwNzRjZDQ1ZWQ5Yjg5ZCIsInRhZyI6IiJ9",
 	},
 	{
 		name:       "aes128_unicode",
@@ -64,8 +64,8 @@ var interopFixtures = []interopFixture{
 	{
 		name:       "aes256_normal",
 		keyHex:     key256Hex,
-		plaintext:  "Hello, interop!",
-		ciphertext: "eyJpdiI6IkVCRVNFeFFWRmhjWUdSb2JIQjBlSHc9PSIsInZhbHVlIjoibGREZGxzSkVMaURtejFTWjNTaG43UT09IiwibWFjIjoiMDAxMmQzZGI0MDBmYmI1YmExM2M3Y2EwZDNiMTIyYTE1ZjJlNDYyZjI1OTNmMTlmODdiOTJkYjdmYzcyNjk0YyIsInRhZyI6IiJ9",
+		plaintext:  "Hello, CBC!",
+		ciphertext: "eyJpdiI6IkVCRVNFeFFWRmhjWUdSb2JIQjBlSHc9PSIsInZhbHVlIjoicWNsd1Ura0ZiM1hDbjIxNUxUQUFBUT09IiwibWFjIjoiNGRhZTYzMmM3MGEwNWM2MTViYjA0MjIyNmZlNGI3ZGUzOGQ2NGQ2YWY2MjZkMzFhNWM5MjgwOWU4MzkwMWI2NCIsInRhZyI6IiJ9",
 	},
 	{
 		name:       "aes256_unicode",
@@ -75,7 +75,7 @@ var interopFixtures = []interopFixture{
 	},
 }
 
-var legacyFixtures = []legacyFixture{
+var base64MACFixtures = []base64MACFixture{
 	{
 		name:       "aes128_normal",
 		keyHex:     key128Hex,
@@ -140,6 +140,29 @@ func encodeTestEnvelope(t *testing.T, envelope any) string {
 		t.Fatalf("marshal test envelope: %v", err)
 	}
 	return base64.StdEncoding.EncodeToString(data)
+}
+
+// requireHexMACEnvelope verifies the public writer's canonical wire shape.
+func requireHexMACEnvelope(t *testing.T, encoded string) {
+	t.Helper()
+	payload, err := parseEncryptedPayload(encoded)
+	if err != nil {
+		t.Fatalf("parse encrypted payload: %v", err)
+	}
+	if payload.format != payloadFormatHexMAC {
+		t.Fatalf("payload format = %d, want hex-MAC", payload.format)
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("decode encrypted payload: %v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("decode encrypted payload JSON: %v", err)
+	}
+	if tag, ok := fields["tag"]; !ok || tag != "" {
+		t.Fatalf("payload tag = %#v, present = %t", tag, ok)
+	}
 }
 
 // TestGenerateAppKeyAndReadAppKey guards supported key generation and parsing against regressions.
@@ -240,10 +263,6 @@ func TestGlobalAPIsPropagateEnvironmentErrors(t *testing.T) {
 			_, err := Encrypt("secret")
 			return err
 		},
-		"encrypt_interop": func() error {
-			_, err := EncryptForInterop("secret")
-			return err
-		},
 		"decrypt": func() error {
 			_, err := Decrypt("ciphertext")
 			return err
@@ -303,9 +322,6 @@ func TestCipherNilReceiver(t *testing.T) {
 	if _, err := cipher.Encrypt("x"); !errors.Is(err, errNilCipher) {
 		t.Fatalf("Cipher.Encrypt error = %v", err)
 	}
-	if _, err := cipher.EncryptForInterop("x"); !errors.Is(err, errNilCipher) {
-		t.Fatalf("Cipher.EncryptForInterop error = %v", err)
-	}
 	if _, err := cipher.Decrypt("x"); !errors.Is(err, errNilCipher) {
 		t.Fatalf("Cipher.Decrypt error = %v", err)
 	}
@@ -317,10 +333,6 @@ func TestCipherZeroValueReturnsInvalidKey(t *testing.T) {
 	for name, call := range map[string]func() error{
 		"encrypt": func() error {
 			_, err := cipher.Encrypt("secret")
-			return err
-		},
-		"encrypt_interop": func() error {
-			_, err := cipher.EncryptForInterop("secret")
 			return err
 		},
 		"decrypt": func() error {
@@ -337,36 +349,36 @@ func TestCipherZeroValueReturnsInvalidKey(t *testing.T) {
 
 	cipher.key = make([]byte, 16)
 	cipher.previousKeys = [][]byte{nil}
-	if _, err := cipher.Decrypt(legacyFixtures[0].ciphertext); !errors.Is(err, ErrInvalidKey) {
+	if _, err := cipher.Decrypt(base64MACFixtures[0].ciphertext); !errors.Is(err, ErrInvalidKey) {
 		t.Fatalf("invalid previous key error = %v", err)
 	}
 }
 
-// TestLegacyFixturesRemainExact guards the original ciphertext wire format against drift.
-func TestLegacyFixturesRemainExact(t *testing.T) {
-	for _, fixture := range legacyFixtures {
+// TestBase64MACFixturesRemainReadable guards backward-compatible reads of historical ciphertext.
+func TestBase64MACFixturesRemainReadable(t *testing.T) {
+	for _, fixture := range base64MACFixtures {
 		fixture := fixture
 		t.Run(fixture.name, func(t *testing.T) {
 			key := fixedKey(t, fixture.keyHex)
-			got, err := encryptWithKeyAndReader(key, fixture.plaintext, payloadFormatLegacy, bytes.NewReader(fixtureIV(t)))
+			payload, err := parseEncryptedPayload(fixture.ciphertext)
 			if err != nil {
-				t.Fatalf("encrypt legacy fixture: %v", err)
+				t.Fatalf("parse base64-MAC fixture: %v", err)
 			}
-			if got != fixture.ciphertext {
-				t.Fatalf("legacy ciphertext drifted\ngot:  %s\nwant: %s", got, fixture.ciphertext)
+			if payload.format != payloadFormatBase64MAC {
+				t.Fatalf("payload format = %d, want base64-MAC", payload.format)
 			}
 			plaintext, err := decryptWithKey(key, fixture.ciphertext)
 			if err != nil || plaintext != fixture.plaintext {
-				t.Fatalf("decrypt legacy fixture = %q, %v", plaintext, err)
+				t.Fatalf("decrypt base64-MAC fixture = %q, %v", plaintext, err)
 			}
 		})
 	}
 }
 
-// TestLegacyReadPreservesHistoricalBase64WhitespaceTolerance guards backward-compatible base64 decoding.
-func TestLegacyReadPreservesHistoricalBase64WhitespaceTolerance(t *testing.T) {
+// TestBase64MACReadPreservesHistoricalWhitespaceTolerance guards backward-compatible base64 decoding.
+func TestBase64MACReadPreservesHistoricalWhitespaceTolerance(t *testing.T) {
 	key := fixedKey(t, key128Hex)
-	raw, err := base64.StdEncoding.DecodeString(legacyFixtures[0].ciphertext)
+	raw, err := base64.StdEncoding.DecodeString(base64MACFixtures[0].ciphertext)
 	if err != nil {
 		t.Fatalf("decode fixture: %v", err)
 	}
@@ -379,27 +391,27 @@ func TestLegacyReadPreservesHistoricalBase64WhitespaceTolerance(t *testing.T) {
 	encoded := encodeTestEnvelope(t, payload)
 	encoded = encoded[:8] + "\n" + encoded[8:]
 	plaintext, err := decryptWithKey(key, encoded)
-	if err != nil || plaintext != legacyFixtures[0].plaintext {
+	if err != nil || plaintext != base64MACFixtures[0].plaintext {
 		t.Fatalf("historically tolerated payload = %q, %v", plaintext, err)
 	}
 }
 
-// TestInteropFixturesMatchExactWireContract guards the alternate CBC envelope against wire drift.
-func TestInteropFixturesMatchExactWireContract(t *testing.T) {
-	for _, fixture := range interopFixtures {
+// TestHexMACFixturesMatchExactWireContract guards the current CBC envelope against wire drift.
+func TestHexMACFixturesMatchExactWireContract(t *testing.T) {
+	for _, fixture := range hexMACFixtures {
 		fixture := fixture
 		t.Run(fixture.name, func(t *testing.T) {
 			key := fixedKey(t, fixture.keyHex)
-			got, err := encryptWithKeyAndReader(key, fixture.plaintext, payloadFormatInterop, bytes.NewReader(fixtureIV(t)))
+			got, err := encryptWithKeyAndReader(key, fixture.plaintext, bytes.NewReader(fixtureIV(t)))
 			if err != nil {
-				t.Fatalf("encrypt interop fixture: %v", err)
+				t.Fatalf("encrypt hex-MAC fixture: %v", err)
 			}
 			if got != fixture.ciphertext {
-				t.Fatalf("interop ciphertext mismatch\ngot:  %s\nwant: %s", got, fixture.ciphertext)
+				t.Fatalf("hex-MAC ciphertext mismatch\ngot:  %s\nwant: %s", got, fixture.ciphertext)
 			}
 			plaintext, err := decryptWithKey(key, fixture.ciphertext)
 			if err != nil || plaintext != fixture.plaintext {
-				t.Fatalf("decrypt interop fixture = %q, %v", plaintext, err)
+				t.Fatalf("decrypt hex-MAC fixture = %q, %v", plaintext, err)
 			}
 		})
 	}
@@ -410,16 +422,13 @@ func TestPayloadStructShapeAndEmissionFields(t *testing.T) {
 	_ = EncryptedPayload{"iv", "value", "mac"}
 	key := fixedKey(t, key256Hex)
 
-	legacy, err := encryptWithKeyAndReader(key, "secret", payloadFormatLegacy, bytes.NewReader(fixtureIV(t)))
+	base64MAC := base64MACFixtures[0].ciphertext
+	hexMAC, err := encryptWithKeyAndReader(key, "secret", bytes.NewReader(fixtureIV(t)))
 	if err != nil {
-		t.Fatalf("legacy encrypt: %v", err)
-	}
-	interop, err := encryptWithKeyAndReader(key, "secret", payloadFormatInterop, bytes.NewReader(fixtureIV(t)))
-	if err != nil {
-		t.Fatalf("interop encrypt: %v", err)
+		t.Fatalf("hex-MAC encrypt: %v", err)
 	}
 
-	for name, encoded := range map[string]string{"legacy": legacy, "interop": interop} {
+	for name, encoded := range map[string]string{"base64MAC": base64MAC, "hexMAC": hexMAC} {
 		raw, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil {
 			t.Fatalf("decode %s payload: %v", name, err)
@@ -429,17 +438,17 @@ func TestPayloadStructShapeAndEmissionFields(t *testing.T) {
 			t.Fatalf("decode %s JSON: %v", name, err)
 		}
 		_, hasTag := fields["tag"]
-		if name == "legacy" && hasTag {
-			t.Fatal("legacy payload unexpectedly gained tag field")
+		if name == "base64MAC" && hasTag {
+			t.Fatal("base64-MAC payload unexpectedly contains a tag field")
 		}
-		if name == "interop" && (!hasTag || fields["tag"] != "") {
-			t.Fatalf("interop tag = %#v", fields["tag"])
+		if name == "hexMAC" && (!hasTag || fields["tag"] != "") {
+			t.Fatalf("hex-MAC tag = %#v", fields["tag"])
 		}
 	}
 }
 
-// TestPublicEncryptionAPIsAndAutomaticReads guards both writers and automatic dual-format reads.
-func TestPublicEncryptionAPIsAndAutomaticReads(t *testing.T) {
+// TestPublicEncryptionAPIsWriteHexMACAndRoundTrip guards the single public write contract.
+func TestPublicEncryptionAPIsWriteHexMACAndRoundTrip(t *testing.T) {
 	key, encodedKey := generatedKeyPair(t)
 	t.Setenv("APP_KEY", encodedKey)
 	t.Setenv("APP_PREVIOUS_KEYS", "")
@@ -452,24 +461,23 @@ func TestPublicEncryptionAPIsAndAutomaticReads(t *testing.T) {
 		name  string
 		write func(string) (string, error)
 	}{
-		{name: "global_legacy", write: Encrypt},
-		{name: "global_interop", write: EncryptForInterop},
-		{name: "instance_legacy", write: cipher.Encrypt},
-		{name: "instance_interop", write: cipher.EncryptForInterop},
+		{name: "global", write: Encrypt},
+		{name: "instance", write: cipher.Encrypt},
 	}
 	for _, writer := range writers {
 		writer := writer
 		t.Run(writer.name, func(t *testing.T) {
-			encoded, err := writer.write("Go + interop 🔐")
+			encoded, err := writer.write("Go + CBC 🔐")
 			if err != nil {
 				t.Fatalf("encrypt: %v", err)
 			}
+			requireHexMACEnvelope(t, encoded)
 			got, err := cipher.Decrypt(encoded)
-			if err != nil || got != "Go + interop 🔐" {
+			if err != nil || got != "Go + CBC 🔐" {
 				t.Fatalf("instance decrypt = %q, %v", got, err)
 			}
 			got, err = Decrypt(encoded)
-			if err != nil || got != "Go + interop 🔐" {
+			if err != nil || got != "Go + CBC 🔐" {
 				t.Fatalf("global decrypt = %q, %v", got, err)
 			}
 		})
@@ -490,8 +498,8 @@ func TestDecryptUsesPreviousKeysForBothFormats(t *testing.T) {
 		ciphertext string
 		plaintext  string
 	}{
-		{ciphertext: legacyFixtures[0].ciphertext, plaintext: legacyFixtures[0].plaintext},
-		{ciphertext: interopFixtures[5].ciphertext, plaintext: interopFixtures[5].plaintext},
+		{ciphertext: base64MACFixtures[0].ciphertext, plaintext: base64MACFixtures[0].plaintext},
+		{ciphertext: hexMACFixtures[5].ciphertext, plaintext: hexMACFixtures[5].plaintext},
 	} {
 		got, err := cipher.Decrypt(fixture.ciphertext)
 		if err != nil || got != fixture.plaintext {
@@ -506,7 +514,7 @@ func TestDecryptWrongKeyReturnsAuthenticationSentinel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	for _, encoded := range []string{legacyFixtures[0].ciphertext, interopFixtures[4].ciphertext} {
+	for _, encoded := range []string{base64MACFixtures[0].ciphertext, hexMACFixtures[4].ciphertext} {
 		_, err := cipher.Decrypt(encoded)
 		if err != ErrAuthentication {
 			t.Fatalf("wrong-key error = %v, want exact ErrAuthentication", err)
@@ -522,7 +530,7 @@ func TestDecryptTamperingReturnsAuthenticationSentinel(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	raw, err := base64.StdEncoding.DecodeString(interopFixtures[4].ciphertext)
+	raw, err := base64.StdEncoding.DecodeString(hexMACFixtures[4].ciphertext)
 	if err != nil {
 		t.Fatalf("decode fixture: %v", err)
 	}
@@ -606,7 +614,7 @@ func TestDecryptRejectsMalformedPayloadsWithoutPanicking(t *testing.T) {
 // TestDecryptAcceptsOmittedOrNullEmptyCBCTag guards supported CBC tag representations.
 func TestDecryptAcceptsOmittedOrNullEmptyCBCTag(t *testing.T) {
 	key := fixedKey(t, key128Hex)
-	raw, err := base64.StdEncoding.DecodeString(legacyFixtures[0].ciphertext)
+	raw, err := base64.StdEncoding.DecodeString(base64MACFixtures[0].ciphertext)
 	if err != nil {
 		t.Fatalf("decode fixture: %v", err)
 	}
@@ -618,7 +626,7 @@ func TestDecryptAcceptsOmittedOrNullEmptyCBCTag(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			envelope["tag"] = tag
 			got, err := decryptWithKey(key, encodeTestEnvelope(t, envelope))
-			if err != nil || got != legacyFixtures[0].plaintext {
+			if err != nil || got != base64MACFixtures[0].plaintext {
 				t.Fatalf("decrypt tag variant = %q, %v", got, err)
 			}
 		})
@@ -649,16 +657,13 @@ func TestDecryptAuthenticatedInvalidPadding(t *testing.T) {
 
 // TestEncryptionInternalFailures guards internal key, entropy, and format failure paths.
 func TestEncryptionInternalFailures(t *testing.T) {
-	if _, err := encryptWithKeyAndReader(make([]byte, 15), "secret", payloadFormatLegacy, bytes.NewReader(fixtureIV(t))); !errors.Is(err, ErrInvalidKey) {
+	if _, err := encryptWithKeyAndReader(make([]byte, 15), "secret", bytes.NewReader(fixtureIV(t))); !errors.Is(err, ErrInvalidKey) {
 		t.Fatalf("invalid key error = %v", err)
 	}
-	if _, err := encryptWithKeyAndReader(make([]byte, 16), "secret", payloadFormatLegacy, failingReader{}); !errors.Is(err, io.ErrUnexpectedEOF) {
+	if _, err := encryptWithKeyAndReader(make([]byte, 16), "secret", failingReader{}); !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("entropy error = %v", err)
 	}
-	if _, err := encryptWithKeyAndReader(make([]byte, 16), "secret", payloadFormat(99), bytes.NewReader(fixtureIV(t))); !errors.Is(err, ErrInvalidPayload) {
-		t.Fatalf("format error = %v", err)
-	}
-	if _, err := decryptWithKey(make([]byte, 17), legacyFixtures[0].ciphertext); !errors.Is(err, ErrInvalidKey) {
+	if _, err := decryptWithKey(make([]byte, 17), base64MACFixtures[0].ciphertext); !errors.Is(err, ErrInvalidKey) {
 		t.Fatalf("decrypt invalid key error = %v", err)
 	}
 	if (parsedEncryptedPayload{format: payloadFormat(99)}).authenticates(make([]byte, 16)) {
@@ -677,9 +682,9 @@ func TestNoArbitraryPlaintextLimit(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	plaintext := strings.Repeat("0123456789abcdef", 1<<16)
-	encoded, err := cipher.EncryptForInterop(plaintext)
+	encoded, err := cipher.Encrypt(plaintext)
 	if err != nil {
-		t.Fatalf("EncryptForInterop large payload: %v", err)
+		t.Fatalf("Encrypt large payload: %v", err)
 	}
 	got, err := cipher.Decrypt(encoded)
 	if err != nil || got != plaintext {
@@ -702,7 +707,7 @@ func TestCipherConcurrentUse(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			encoded, err := cipher.EncryptForInterop("concurrent")
+			encoded, err := cipher.Encrypt("concurrent")
 			if err != nil {
 				errorsSeen <- err
 				return
@@ -747,7 +752,7 @@ func FuzzCipherDecryptNeverPanics(f *testing.F) {
 	if err != nil {
 		f.Fatalf("New: %v", err)
 	}
-	for _, seed := range []string{"", "not-base64", legacyFixtures[0].ciphertext, interopFixtures[4].ciphertext} {
+	for _, seed := range []string{"", "not-base64", base64MACFixtures[0].ciphertext, hexMACFixtures[4].ciphertext} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, payload string) {

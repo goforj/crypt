@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-    Authenticated AES-128/256 CBC for Go, with explicit interoperability and key rotation.
+    Authenticated AES-128/256 CBC for Go, with backward-compatible reads and key rotation.
 </p>
 
 <p align="center">
@@ -24,12 +24,12 @@ go get github.com/goforj/crypt
 
 # Features
 
-**crypt** provides authenticated AES-CBC encryption for Go services and graceful key rotation through **APP_PREVIOUS_KEYS**. Existing APIs retain the package's original wire format; interoperability writes are an explicit opt-in.
+**crypt** provides authenticated AES-CBC encryption for Go services and graceful key rotation through **APP_PREVIOUS_KEYS**. `Encrypt` uses one current wire format, while `Decrypt` remains backward-compatible with ciphertext written by earlier releases.
 
 - AES-128 / AES-256 CBC encryption
 - Authenticated encryption (AES-CBC + HMAC)
-- Explicit alternate-envelope interoperability
-- Automatic reads of both supported CBC envelopes
+- One canonical CBC write format
+- Backward-compatible reads of historical CBC envelopes
 - Transparent key rotation via `APP_PREVIOUS_KEYS`
 - Zero dependencies (stdlib only)
 - Instanced and global usage styles
@@ -41,7 +41,7 @@ go get github.com/goforj/crypt
 
 It is not a general-purpose cryptography library.
 
-It is a focused, application-layer utility designed to be boring, predictable, and interoperable.
+It is a focused, application-layer utility designed to be boring and predictable.
 
 ## Quickstart
 
@@ -68,7 +68,6 @@ func main() {
 		panic(err)
 	}
 
-	// Encrypt preserves crypt's original wire format.
 	ciphertext, err := c.Encrypt("secret")
 	if err != nil {
 		panic(err)
@@ -83,13 +82,7 @@ func main() {
 }
 ```
 
-For the alternate interoperability envelope, make the write mode explicit:
-
-```go
-ciphertext, err := c.EncryptForInterop("secret")
-```
-
-`c.Decrypt` automatically reads both formats.
+`c.Decrypt` also reads ciphertext written in crypt's historical format.
 
 ### Global (env-based convenience)
 
@@ -106,7 +99,7 @@ import (
 func main() {
 	_ = os.Setenv("APP_KEY", "base64:...")
 
-	ciphertext, _ := crypt.EncryptForInterop("secret")
+	ciphertext, _ := crypt.Encrypt("secret")
 	plaintext, _ := crypt.Decrypt(ciphertext)
 
 	fmt.Println(plaintext) // "secret"
@@ -133,11 +126,10 @@ export APP_PREVIOUS_KEYS="base64:2nLsGFGzyoae2ax3EF2Lyq/hH6QghBGLIq5uL+Gp8/w="
 
 | Operation | crypt original format | Laravel 12 CBC `encryptString` |
 |---|---:|---:|
-| `Encrypt` / `(*Cipher).Encrypt` writes | Yes | No |
-| `EncryptForInterop` / `(*Cipher).EncryptForInterop` writes | No | Yes |
+| `Encrypt` / `(*Cipher).Encrypt` writes | No | Yes |
 | `Decrypt` / `(*Cipher).Decrypt` reads | Yes | Yes |
 
-The interoperability writer follows the official CBC envelope: outer-base64 JSON containing
+`Encrypt` writes the compatible CBC envelope: outer-base64 JSON containing
 `iv`, `value`, lowercase hexadecimal `mac`, and an explicit empty `tag`. It signs
 the base64 IV and ciphertext strings, matching Laravel's
 [`Encrypter`](https://github.com/laravel/framework/blob/12.x/src/Illuminate/Encryption/Encrypter.php).
@@ -148,17 +140,21 @@ produce or consume PHP-serialized values from Laravel's generic `encrypt` method
 and it does not support Laravel's GCM ciphers. See Laravel's
 [encryption documentation](https://laravel.com/docs/12.x/encryption) for the upstream model.
 
-## Migrating writers safely
+## Wire-format migration
 
-Existing `Encrypt` calls and ciphertext remain unchanged. To adopt interoperability writes:
+This release changes `Encrypt` and `(*Cipher).Encrypt` from crypt's original envelope
+to the hex-MAC envelope described above. Their Go signatures are unchanged, and `Decrypt` remains
+backward-compatible with existing ciphertext.
 
-1. Deploy this version everywhere values may be decrypted. Its readers accept both formats.
-2. Change only the intended writers to `EncryptForInterop`.
-3. Re-encrypt stored legacy values gradually if an external consumer must read them.
-4. Keep required old keys in `APP_PREVIOUS_KEYS` until all ciphertext using them has expired or migrated.
+Older crypt releases and external consumers that only understand the original MAC
+encoding cannot read new writes. Mixed-version deployments must either release the
+dual-format reader before switching writers or pause writes during a coordinated
+upgrade. Existing ciphertext does not need re-encryption unless a consumer that only
+accepts the hex-MAC envelope must read it. Keep required old keys in `APP_PREVIOUS_KEYS` until dependent
+ciphertext expires or is migrated.
 
-No flag silently changes existing writers. `EncryptedPayload` also retains its original
-three-field shape for source compatibility with keyed and unkeyed composite literals.
+`EncryptedPayload` retains its original three-field Go shape for source compatibility,
+but ciphertext envelopes should be treated as opaque.
 
 ## Security and error handling
 
@@ -187,7 +183,7 @@ Atomic replacement creates an inode owned by the writing process, so run these h
 under the account that should own the resulting file. If rename commits but directory
 sync reports a durability error, the helper returns both the installed key and the error.
 
-Benchmarks for both formats are available with `go test -bench=. -benchmem`.
+Encryption and both read formats can be benchmarked with `go test -bench=. -benchmem`.
 
 ## Runnable examples
 
@@ -206,8 +202,8 @@ Instanced = methods on `*crypt.Cipher` with injected keys.
 
 | Group | Namespace | Functions |
 |------:|-----------|-----------|
-| **Encryption** | Global | [Decrypt](#decrypt) · [Encrypt](#encrypt) · [EncryptForInterop](#encryptforinterop) |
-| **Encryption** | Instanced | [Cipher.Decrypt](#cipher-decrypt) · [Cipher.Encrypt](#cipher-encrypt) · [Cipher.EncryptForInterop](#cipher-encryptforinterop) |
+| **Encryption** | Global | [Decrypt](#decrypt) · [Encrypt](#encrypt) |
+| **Encryption** | Instanced | [Cipher.Decrypt](#cipher-decrypt) · [Cipher.Encrypt](#cipher-encrypt) |
 | **Key management** | Global | [GenerateAppKey](#generateappkey) · [GenerateKeyToEnv](#generatekeytoenv) · [GetAppKey](#getappkey) · [GetPreviousAppKeys](#getpreviousappkeys) · [New](#new) · [NewFromEnv](#newfromenv) · [ReadAppKey](#readappkey) · [RotateKeyInEnv](#rotatekeyinenv) |
 
 
@@ -251,8 +247,8 @@ godump.Dump(plaintext, err)
 
 #### <a id="encrypt"></a>Encrypt
 
-Encrypt encrypts plaintext with APP_KEY in crypt's original payload format.
-Existing ciphertext writers retain their historical wire contract.
+Encrypt encrypts plaintext with APP_KEY using the hex-MAC CBC envelope.
+The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
 
 ```go
 appKey, _ := crypt.GenerateAppKey()
@@ -263,43 +259,22 @@ godump.Dump(err == nil, ciphertext != "")
 // #bool true
 ```
 
-#### <a id="encryptforinterop"></a>EncryptForInterop
-
-EncryptForInterop encrypts plaintext with APP_KEY using the interoperability CBC envelope.
-The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
-This explicit opt-in avoids silently changing the existing Encrypt wire format.
-
-```go
-appKey, _ := crypt.GenerateAppKey()
-_ = os.Setenv("APP_KEY", appKey)
-ciphertext, err := crypt.EncryptForInterop("secret")
-godump.Dump(err == nil, ciphertext != "")
-// #bool true
-// #bool true
-```
-
 ### Instanced
 
 #### <a id="cipher-decrypt"></a>Cipher.Decrypt
 
-Decrypt decrypts either supported CBC envelope.
+Decrypt decrypts current and historical CBC envelopes.
 It authenticates with the current key first, followed by configured previous keys.
 
 #### <a id="cipher-encrypt"></a>Cipher.Encrypt
 
-Encrypt encrypts plaintext with the Cipher's current key in crypt's original format.
-Existing callers keep the same wire format; use EncryptForInterop when an external consumer requires the alternate envelope.
-
-#### <a id="cipher-encryptforinterop"></a>Cipher.EncryptForInterop
-
-EncryptForInterop encrypts plaintext with the Cipher's current key using the interoperability CBC envelope.
+Encrypt encrypts plaintext with the Cipher's current key using the hex-MAC CBC envelope.
 The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
-This explicit opt-in leaves Encrypt's established wire format unchanged.
 
 ```go
 key := make([]byte, 32)
 c, _ := crypt.New(key)
-ciphertext, err := c.EncryptForInterop("secret")
+ciphertext, err := c.Encrypt("secret")
 godump.Dump(err == nil, ciphertext != "")
 // #bool true
 // #bool true
