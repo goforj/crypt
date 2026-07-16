@@ -11,7 +11,7 @@ import (
 
 // main keeps the generated API example executable so documentation drift fails during compilation.
 func main() {
-	// GenerateAppKey generates a random AES-256 key using Laravel's base64-prefixed key syntax.
+	// GenerateAppKey generates a random AES-256 key using the base64-prefixed APP_KEY syntax.
 
 	// Example: generate an AES-256 key
 	key, _ := crypt.GenerateAppKey()

@@ -32,7 +32,7 @@ type payloadFormat uint8
 
 const (
 	payloadFormatLegacy payloadFormat = iota
-	payloadFormatLaravel
+	payloadFormatInterop
 )
 
 // Cipher provides instance-based encryption and decryption with injected keys.
@@ -47,14 +47,14 @@ type Cipher struct {
 // EncryptedPayload describes the original crypt ciphertext envelope.
 //
 // This type intentionally retains its original three-field shape so code using unkeyed
-// composite literals remains source compatible. Laravel envelopes are parsed internally.
+// composite literals remains source compatible. Alternate envelopes are parsed internally.
 type EncryptedPayload struct {
 	IV    string `json:"iv"`
 	Value string `json:"value"`
 	MAC   string `json:"mac"`
 }
 
-// encryptedPayloadEnvelope accepts both legacy and Laravel CBC envelopes without changing EncryptedPayload.
+// encryptedPayloadEnvelope accepts both supported CBC envelopes without changing EncryptedPayload.
 type encryptedPayloadEnvelope struct {
 	IV    string          `json:"iv"`
 	Value string          `json:"value"`
@@ -62,8 +62,8 @@ type encryptedPayloadEnvelope struct {
 	Tag   json.RawMessage `json:"tag"`
 }
 
-// laravelEncryptedPayload preserves Laravel's required field order and explicit empty CBC tag.
-type laravelEncryptedPayload struct {
+// interopEncryptedPayload preserves the interoperability envelope's field order and explicit empty CBC tag.
+type interopEncryptedPayload struct {
 	IV    string `json:"iv"`
 	Value string `json:"value"`
 	MAC   string `json:"mac"`
@@ -123,7 +123,7 @@ func NewFromEnv() (*Cipher, error) {
 }
 
 // Encrypt encrypts plaintext with the Cipher's current key in crypt's original format.
-// Existing callers keep the same wire format; use EncryptLaravel for Laravel interoperability.
+// Existing callers keep the same wire format; use EncryptForInterop when an external consumer requires the alternate envelope.
 // @group Encryption
 // @behavior readonly
 func (c *Cipher) Encrypt(plaintext string) (string, error) {
@@ -133,27 +133,28 @@ func (c *Cipher) Encrypt(plaintext string) (string, error) {
 	return encryptWithKey(c.key, plaintext)
 }
 
-// EncryptLaravel encrypts plaintext with the Cipher's current key in Laravel's encryptString format.
-// The result can be consumed by Laravel 12 AES-128-CBC or AES-256-CBC encrypters.
+// EncryptForInterop encrypts plaintext with the Cipher's current key using the interoperability CBC envelope.
+// The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
+// This explicit opt-in leaves Encrypt's established wire format unchanged.
 // @group Encryption
 // @behavior readonly
 //
-// Example: emit a Laravel-compatible ciphertext with an injected key
+// Example: emit an interoperability ciphertext with an injected key
 //
 //	key := make([]byte, 32)
 //	c, _ := crypt.New(key)
-//	ciphertext, err := c.EncryptLaravel("secret")
+//	ciphertext, err := c.EncryptForInterop("secret")
 //	godump.Dump(err == nil, ciphertext != "")
 //	// #bool true
 //	// #bool true
-func (c *Cipher) EncryptLaravel(plaintext string) (string, error) {
+func (c *Cipher) EncryptForInterop(plaintext string) (string, error) {
 	if c == nil {
 		return "", errNilCipher
 	}
-	return encryptLaravelWithKey(c.key, plaintext)
+	return encryptForInteropWithKey(c.key, plaintext)
 }
 
-// Decrypt decrypts either crypt's original format or Laravel's CBC encryptString format.
+// Decrypt decrypts either supported CBC envelope.
 // It authenticates with the current key first, followed by configured previous keys.
 // @group Encryption
 // @behavior readonly
@@ -164,7 +165,7 @@ func (c *Cipher) Decrypt(encodedPayload string) (string, error) {
 	return decryptWithCandidateKeys(c.key, c.previousKeys, encodedPayload)
 }
 
-// GenerateAppKey generates a random AES-256 key using Laravel's base64-prefixed key syntax.
+// GenerateAppKey generates a random AES-256 key using the base64-prefixed APP_KEY syntax.
 // @group Key management
 // @behavior readonly
 //
@@ -290,25 +291,26 @@ func Encrypt(plaintext string) (string, error) {
 	return encryptWithKey(key, plaintext)
 }
 
-// EncryptLaravel encrypts plaintext with APP_KEY in Laravel's encryptString CBC format.
+// EncryptForInterop encrypts plaintext with APP_KEY using the interoperability CBC envelope.
+// The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
 // This explicit opt-in avoids silently changing the existing Encrypt wire format.
 // @group Encryption
 // @behavior readonly
 //
-// Example: emit a Laravel-compatible ciphertext from APP_KEY
+// Example: emit an interoperability ciphertext from APP_KEY
 //
 //	appKey, _ := crypt.GenerateAppKey()
 //	_ = os.Setenv("APP_KEY", appKey)
-//	ciphertext, err := crypt.EncryptLaravel("secret")
+//	ciphertext, err := crypt.EncryptForInterop("secret")
 //	godump.Dump(err == nil, ciphertext != "")
 //	// #bool true
 //	// #bool true
-func EncryptLaravel(plaintext string) (string, error) {
+func EncryptForInterop(plaintext string) (string, error) {
 	key, err := GetAppKey()
 	if err != nil {
 		return "", err
 	}
-	return encryptLaravelWithKey(key, plaintext)
+	return encryptForInteropWithKey(key, plaintext)
 }
 
 // Decrypt decrypts either supported payload format using APP_KEY and APP_PREVIOUS_KEYS.
@@ -401,9 +403,9 @@ func encryptWithKey(key []byte, plaintext string) (string, error) {
 	return encryptWithKeyAndReader(key, plaintext, payloadFormatLegacy, rand.Reader)
 }
 
-// encryptLaravelWithKey emits Laravel's CBC encryptString envelope with an explicit empty tag.
-func encryptLaravelWithKey(key []byte, plaintext string) (string, error) {
-	return encryptWithKeyAndReader(key, plaintext, payloadFormatLaravel, rand.Reader)
+// encryptForInteropWithKey emits the alternate CBC envelope with a lowercase hexadecimal MAC and explicit empty tag.
+func encryptForInteropWithKey(key []byte, plaintext string) (string, error) {
+	return encryptWithKeyAndReader(key, plaintext, payloadFormatInterop, rand.Reader)
 }
 
 // encryptWithKeyAndReader shares AES-CBC construction while keeping each format's MAC contract distinct.
@@ -435,9 +437,9 @@ func encryptWithKeyAndReader(key []byte, plaintext string, format payloadFormat,
 			MAC:   base64.StdEncoding.EncodeToString(mac),
 		}
 		jsonData, err = json.Marshal(payload)
-	case payloadFormatLaravel:
+	case payloadFormatInterop:
 		mac := computeHMACSHA256([]byte(encodedIV+encodedValue), key)
-		payload := laravelEncryptedPayload{
+		payload := interopEncryptedPayload{
 			IV:    encodedIV,
 			Value: encodedValue,
 			MAC:   hex.EncodeToString(mac),
@@ -524,7 +526,7 @@ func parseEncryptedPayload(encodedPayload string) (parsedEncryptedPayload, error
 	}, nil
 }
 
-// validateCBCTag accepts Laravel's empty or omitted CBC tag but rejects AEAD data under CBC.
+// validateCBCTag accepts empty or omitted CBC tags but rejects AEAD data under CBC.
 func validateCBCTag(raw json.RawMessage) error {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
@@ -546,7 +548,7 @@ func parsePayloadMAC(encodedMAC string) (payloadFormat, []byte, error) {
 	if len(encodedMAC) == sha256.Size*2 && isLowerHex(encodedMAC) {
 		mac, err := hex.DecodeString(encodedMAC)
 		if err == nil {
-			return payloadFormatLaravel, mac, nil
+			return payloadFormatInterop, mac, nil
 		}
 	}
 
@@ -557,7 +559,7 @@ func parsePayloadMAC(encodedMAC string) (payloadFormat, []byte, error) {
 	return 0, nil, fmt.Errorf("%w: MAC has an unsupported encoding", ErrInvalidPayload)
 }
 
-// isLowerHex enforces Laravel's lowercase hash_hmac output rather than accepting ambiguous variants.
+// isLowerHex enforces canonical lowercase hexadecimal MAC output rather than accepting ambiguous variants.
 func isLowerHex(value string) bool {
 	for _, char := range value {
 		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
@@ -573,7 +575,7 @@ func (p parsedEncryptedPayload) authenticates(key []byte) bool {
 	switch p.format {
 	case payloadFormatLegacy:
 		expected = computeHMACSHA256Parts(key, p.iv, p.ciphertext)
-	case payloadFormatLaravel:
+	case payloadFormatInterop:
 		expected = computeHMACSHA256([]byte(p.encodedIV+p.encodedValue), key)
 	default:
 		return false

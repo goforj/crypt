@@ -11,13 +11,14 @@ import (
 
 // main keeps the generated API example executable so documentation drift fails during compilation.
 func main() {
-	// EncryptLaravel encrypts plaintext with the Cipher's current key in Laravel's encryptString format.
-	// The result can be consumed by Laravel 12 AES-128-CBC or AES-256-CBC encrypters.
+	// EncryptForInterop encrypts plaintext with the Cipher's current key using the interoperability CBC envelope.
+	// The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
+	// This explicit opt-in leaves Encrypt's established wire format unchanged.
 
-	// Example: emit a Laravel-compatible ciphertext with an injected key
+	// Example: emit an interoperability ciphertext with an injected key
 	key := make([]byte, 32)
 	c, _ := crypt.New(key)
-	ciphertext, err := c.EncryptLaravel("secret")
+	ciphertext, err := c.EncryptForInterop("secret")
 	godump.Dump(err == nil, ciphertext != "")
 	// #bool true
 	// #bool true

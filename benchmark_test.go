@@ -19,15 +19,15 @@ func BenchmarkCipherEncryptLegacy(b *testing.B) {
 	}
 }
 
-// BenchmarkCipherEncryptLaravel tracks the explicit interoperability writer.
-func BenchmarkCipherEncryptLaravel(b *testing.B) {
+// BenchmarkCipherEncryptForInterop tracks the explicit interoperability writer.
+func BenchmarkCipherEncryptForInterop(b *testing.B) {
 	cipher, err := New(bytes.Repeat([]byte{0x42}, 32))
 	if err != nil {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := cipher.EncryptLaravel("benchmark payload"); err != nil {
+		if _, err := cipher.EncryptForInterop("benchmark payload"); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -38,9 +38,9 @@ func BenchmarkCipherDecryptLegacy(b *testing.B) {
 	benchmarkDecrypt(b, payloadFormatLegacy)
 }
 
-// BenchmarkCipherDecryptLaravel tracks authenticated Laravel-compatible reads.
-func BenchmarkCipherDecryptLaravel(b *testing.B) {
-	benchmarkDecrypt(b, payloadFormatLaravel)
+// BenchmarkCipherDecryptInterop tracks authenticated interoperability reads.
+func BenchmarkCipherDecryptInterop(b *testing.B) {
+	benchmarkDecrypt(b, payloadFormatInterop)
 }
 
 // benchmarkDecrypt prepares one ciphertext so benchmarks measure the read path only.

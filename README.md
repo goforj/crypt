@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-    Authenticated AES-128/256 CBC for Go, with explicit Laravel interoperability and key rotation.
+    Authenticated AES-128/256 CBC for Go, with explicit interoperability and key rotation.
 </p>
 
 <p align="center">
@@ -24,12 +24,12 @@ go get github.com/goforj/crypt
 
 # Features
 
-**crypt** provides authenticated AES-CBC encryption for Go services and graceful key rotation through **APP_PREVIOUS_KEYS**. Existing APIs retain the package's original wire format; Laravel-compatible writes are an explicit opt-in.
+**crypt** provides authenticated AES-CBC encryption for Go services and graceful key rotation through **APP_PREVIOUS_KEYS**. Existing APIs retain the package's original wire format; interoperability writes are an explicit opt-in.
 
 - AES-128 / AES-256 CBC encryption
 - Authenticated encryption (AES-CBC + HMAC)
-- Explicit Laravel 12 `encryptString` interoperability
-- Automatic reads of legacy and Laravel CBC payloads
+- Explicit alternate-envelope interoperability
+- Automatic reads of both supported CBC envelopes
 - Transparent key rotation via `APP_PREVIOUS_KEYS`
 - Zero dependencies (stdlib only)
 - Instanced and global usage styles
@@ -83,10 +83,10 @@ func main() {
 }
 ```
 
-For ciphertext that Laravel can consume, make the write mode explicit:
+For the alternate interoperability envelope, make the write mode explicit:
 
 ```go
-ciphertext, err := c.EncryptLaravel("secret")
+ciphertext, err := c.EncryptForInterop("secret")
 ```
 
 `c.Decrypt` automatically reads both formats.
@@ -106,7 +106,7 @@ import (
 func main() {
 	_ = os.Setenv("APP_KEY", "base64:...")
 
-	ciphertext, _ := crypt.EncryptLaravel("secret")
+	ciphertext, _ := crypt.EncryptForInterop("secret")
 	plaintext, _ := crypt.Decrypt(ciphertext)
 
 	fmt.Println(plaintext) // "secret"
@@ -115,7 +115,7 @@ func main() {
 
 ## Key format & rotation
 
-`crypt` uses Laravel's base64-prefixed key syntax and supports graceful decryption during rotation.
+`crypt` uses a base64-prefixed application-key syntax and supports graceful decryption during rotation.
 
 * **`APP_KEY`** must be prefixed with `base64:` and decode to either **16 bytes (AES-128)** or **32 bytes (AES-256)**.
 * **`APP_PREVIOUS_KEYS`** is optional and may contain a comma-separated list of older keys in the same format.
@@ -134,10 +134,10 @@ export APP_PREVIOUS_KEYS="base64:2nLsGFGzyoae2ax3EF2Lyq/hH6QghBGLIq5uL+Gp8/w="
 | Operation | crypt original format | Laravel 12 CBC `encryptString` |
 |---|---:|---:|
 | `Encrypt` / `(*Cipher).Encrypt` writes | Yes | No |
-| `EncryptLaravel` / `(*Cipher).EncryptLaravel` writes | No | Yes |
+| `EncryptForInterop` / `(*Cipher).EncryptForInterop` writes | No | Yes |
 | `Decrypt` / `(*Cipher).Decrypt` reads | Yes | Yes |
 
-The Laravel writer follows the official CBC envelope: outer-base64 JSON containing
+The interoperability writer follows the official CBC envelope: outer-base64 JSON containing
 `iv`, `value`, lowercase hexadecimal `mac`, and an explicit empty `tag`. It signs
 the base64 IV and ciphertext strings, matching Laravel's
 [`Encrypter`](https://github.com/laravel/framework/blob/12.x/src/Illuminate/Encryption/Encrypter.php).
@@ -150,11 +150,11 @@ and it does not support Laravel's GCM ciphers. See Laravel's
 
 ## Migrating writers safely
 
-Existing `Encrypt` calls and ciphertext remain unchanged. To adopt Laravel writes:
+Existing `Encrypt` calls and ciphertext remain unchanged. To adopt interoperability writes:
 
 1. Deploy this version everywhere values may be decrypted. Its readers accept both formats.
-2. Change only the intended writers to `EncryptLaravel`.
-3. Re-encrypt stored legacy values gradually if a Laravel-only consumer must read them.
+2. Change only the intended writers to `EncryptForInterop`.
+3. Re-encrypt stored legacy values gradually if an external consumer must read them.
 4. Keep required old keys in `APP_PREVIOUS_KEYS` until all ciphertext using them has expired or migrated.
 
 No flag silently changes existing writers. `EncryptedPayload` also retains its original
@@ -206,8 +206,8 @@ Instanced = methods on `*crypt.Cipher` with injected keys.
 
 | Group | Namespace | Functions |
 |------:|-----------|-----------|
-| **Encryption** | Global | [Decrypt](#decrypt) · [Encrypt](#encrypt) · [EncryptLaravel](#encryptlaravel) |
-| **Encryption** | Instanced | [Cipher.Decrypt](#cipher-decrypt) · [Cipher.Encrypt](#cipher-encrypt) · [Cipher.EncryptLaravel](#cipher-encryptlaravel) |
+| **Encryption** | Global | [Decrypt](#decrypt) · [Encrypt](#encrypt) · [EncryptForInterop](#encryptforinterop) |
+| **Encryption** | Instanced | [Cipher.Decrypt](#cipher-decrypt) · [Cipher.Encrypt](#cipher-encrypt) · [Cipher.EncryptForInterop](#cipher-encryptforinterop) |
 | **Key management** | Global | [GenerateAppKey](#generateappkey) · [GenerateKeyToEnv](#generatekeytoenv) · [GetAppKey](#getappkey) · [GetPreviousAppKeys](#getpreviousappkeys) · [New](#new) · [NewFromEnv](#newfromenv) · [ReadAppKey](#readappkey) · [RotateKeyInEnv](#rotatekeyinenv) |
 
 
@@ -263,15 +263,16 @@ godump.Dump(err == nil, ciphertext != "")
 // #bool true
 ```
 
-#### <a id="encryptlaravel"></a>EncryptLaravel
+#### <a id="encryptforinterop"></a>EncryptForInterop
 
-EncryptLaravel encrypts plaintext with APP_KEY in Laravel's encryptString CBC format.
+EncryptForInterop encrypts plaintext with APP_KEY using the interoperability CBC envelope.
+The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
 This explicit opt-in avoids silently changing the existing Encrypt wire format.
 
 ```go
 appKey, _ := crypt.GenerateAppKey()
 _ = os.Setenv("APP_KEY", appKey)
-ciphertext, err := crypt.EncryptLaravel("secret")
+ciphertext, err := crypt.EncryptForInterop("secret")
 godump.Dump(err == nil, ciphertext != "")
 // #bool true
 // #bool true
@@ -281,23 +282,24 @@ godump.Dump(err == nil, ciphertext != "")
 
 #### <a id="cipher-decrypt"></a>Cipher.Decrypt
 
-Decrypt decrypts either crypt's original format or Laravel's CBC encryptString format.
+Decrypt decrypts either supported CBC envelope.
 It authenticates with the current key first, followed by configured previous keys.
 
 #### <a id="cipher-encrypt"></a>Cipher.Encrypt
 
 Encrypt encrypts plaintext with the Cipher's current key in crypt's original format.
-Existing callers keep the same wire format; use EncryptLaravel for Laravel interoperability.
+Existing callers keep the same wire format; use EncryptForInterop when an external consumer requires the alternate envelope.
 
-#### <a id="cipher-encryptlaravel"></a>Cipher.EncryptLaravel
+#### <a id="cipher-encryptforinterop"></a>Cipher.EncryptForInterop
 
-EncryptLaravel encrypts plaintext with the Cipher's current key in Laravel's encryptString format.
-The result can be consumed by Laravel 12 AES-128-CBC or AES-256-CBC encrypters.
+EncryptForInterop encrypts plaintext with the Cipher's current key using the interoperability CBC envelope.
+The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
+This explicit opt-in leaves Encrypt's established wire format unchanged.
 
 ```go
 key := make([]byte, 32)
 c, _ := crypt.New(key)
-ciphertext, err := c.EncryptLaravel("secret")
+ciphertext, err := c.EncryptForInterop("secret")
 godump.Dump(err == nil, ciphertext != "")
 // #bool true
 // #bool true
@@ -309,7 +311,7 @@ godump.Dump(err == nil, ciphertext != "")
 
 #### <a id="generateappkey"></a>GenerateAppKey
 
-GenerateAppKey generates a random AES-256 key using Laravel's base64-prefixed key syntax.
+GenerateAppKey generates a random AES-256 key using the base64-prefixed APP_KEY syntax.
 
 ```go
 key, _ := crypt.GenerateAppKey()

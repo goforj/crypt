@@ -20,8 +20,8 @@ const (
 	key256Hex    = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 )
 
-// laravelFixture records independently derived Laravel 12 CBC encryptString vectors.
-type laravelFixture struct {
+// interopFixture records independently derived CBC interoperability vectors.
+type interopFixture struct {
 	name       string
 	keyHex     string
 	plaintext  string
@@ -36,7 +36,7 @@ type legacyFixture struct {
 	ciphertext string
 }
 
-var laravelFixtures = []laravelFixture{
+var interopFixtures = []interopFixture{
 	{
 		name:       "aes128_empty",
 		keyHex:     key128Hex,
@@ -46,8 +46,8 @@ var laravelFixtures = []laravelFixture{
 	{
 		name:       "aes128_normal",
 		keyHex:     key128Hex,
-		plaintext:  "Hello, Laravel!",
-		ciphertext: "eyJpdiI6IkVCRVNFeFFWRmhjWUdSb2JIQjBlSHc9PSIsInZhbHVlIjoiZHN6Z2MrY1VSVmNWdFIwUkV6cXk4dz09IiwibWFjIjoiMjVkMmVlYjNjN2RiODNhNGFkNTQzMmEzNjU2YzFmZjRmMGNlZDhiZTgzYTQ1ODUwYWRkNDgyYjQ5YjRmNjE0MCIsInRhZyI6IiJ9",
+		plaintext:  "Hello, interop!",
+		ciphertext: "eyJpdiI6IkVCRVNFeFFWRmhjWUdSb2JIQjBlSHc9PSIsInZhbHVlIjoibzM5Q090VDZBMkhRRkFXN3E4SGtRUT09IiwibWFjIjoiYzk0MWRiYTIzZjJlZTBiMDc1OTJjY2YyZTk2YTJmNmNmNWQ0M2FkN2JiYjM1ZjBhOTc4YjhjZTA3MmNmMWU4NSIsInRhZyI6IiJ9",
 	},
 	{
 		name:       "aes128_unicode",
@@ -64,8 +64,8 @@ var laravelFixtures = []laravelFixture{
 	{
 		name:       "aes256_normal",
 		keyHex:     key256Hex,
-		plaintext:  "Hello, Laravel!",
-		ciphertext: "eyJpdiI6IkVCRVNFeFFWRmhjWUdSb2JIQjBlSHc9PSIsInZhbHVlIjoiQzFSSG8wNW83V1FCYXRveWZ6bTB4QT09IiwibWFjIjoiOWE5NDllNmM5ZGRkZDI1MzkzYzFiODJiZjU1OTJkNTM4ZmJlNjEyZjQxYTNhNTExZTJiMDIxYTYyZjUyY2M1MCIsInRhZyI6IiJ9",
+		plaintext:  "Hello, interop!",
+		ciphertext: "eyJpdiI6IkVCRVNFeFFWRmhjWUdSb2JIQjBlSHc9PSIsInZhbHVlIjoibGREZGxzSkVMaURtejFTWjNTaG43UT09IiwibWFjIjoiMDAxMmQzZGI0MDBmYmI1YmExM2M3Y2EwZDNiMTIyYTE1ZjJlNDYyZjI1OTNmMTlmODdiOTJkYjdmYzcyNjk0YyIsInRhZyI6IiJ9",
 	},
 	{
 		name:       "aes256_unicode",
@@ -240,8 +240,8 @@ func TestGlobalAPIsPropagateEnvironmentErrors(t *testing.T) {
 			_, err := Encrypt("secret")
 			return err
 		},
-		"encrypt_laravel": func() error {
-			_, err := EncryptLaravel("secret")
+		"encrypt_interop": func() error {
+			_, err := EncryptForInterop("secret")
 			return err
 		},
 		"decrypt": func() error {
@@ -303,8 +303,8 @@ func TestCipherNilReceiver(t *testing.T) {
 	if _, err := cipher.Encrypt("x"); !errors.Is(err, errNilCipher) {
 		t.Fatalf("Cipher.Encrypt error = %v", err)
 	}
-	if _, err := cipher.EncryptLaravel("x"); !errors.Is(err, errNilCipher) {
-		t.Fatalf("Cipher.EncryptLaravel error = %v", err)
+	if _, err := cipher.EncryptForInterop("x"); !errors.Is(err, errNilCipher) {
+		t.Fatalf("Cipher.EncryptForInterop error = %v", err)
 	}
 	if _, err := cipher.Decrypt("x"); !errors.Is(err, errNilCipher) {
 		t.Fatalf("Cipher.Decrypt error = %v", err)
@@ -319,8 +319,8 @@ func TestCipherZeroValueReturnsInvalidKey(t *testing.T) {
 			_, err := cipher.Encrypt("secret")
 			return err
 		},
-		"encrypt_laravel": func() error {
-			_, err := cipher.EncryptLaravel("secret")
+		"encrypt_interop": func() error {
+			_, err := cipher.EncryptForInterop("secret")
 			return err
 		},
 		"decrypt": func() error {
@@ -384,22 +384,22 @@ func TestLegacyReadPreservesHistoricalBase64WhitespaceTolerance(t *testing.T) {
 	}
 }
 
-// TestLaravelFixturesMatchExactWireContract guards Laravel CBC interoperability against wire drift.
-func TestLaravelFixturesMatchExactWireContract(t *testing.T) {
-	for _, fixture := range laravelFixtures {
+// TestInteropFixturesMatchExactWireContract guards the alternate CBC envelope against wire drift.
+func TestInteropFixturesMatchExactWireContract(t *testing.T) {
+	for _, fixture := range interopFixtures {
 		fixture := fixture
 		t.Run(fixture.name, func(t *testing.T) {
 			key := fixedKey(t, fixture.keyHex)
-			got, err := encryptWithKeyAndReader(key, fixture.plaintext, payloadFormatLaravel, bytes.NewReader(fixtureIV(t)))
+			got, err := encryptWithKeyAndReader(key, fixture.plaintext, payloadFormatInterop, bytes.NewReader(fixtureIV(t)))
 			if err != nil {
-				t.Fatalf("encrypt Laravel fixture: %v", err)
+				t.Fatalf("encrypt interop fixture: %v", err)
 			}
 			if got != fixture.ciphertext {
-				t.Fatalf("Laravel ciphertext mismatch\ngot:  %s\nwant: %s", got, fixture.ciphertext)
+				t.Fatalf("interop ciphertext mismatch\ngot:  %s\nwant: %s", got, fixture.ciphertext)
 			}
 			plaintext, err := decryptWithKey(key, fixture.ciphertext)
 			if err != nil || plaintext != fixture.plaintext {
-				t.Fatalf("decrypt Laravel fixture = %q, %v", plaintext, err)
+				t.Fatalf("decrypt interop fixture = %q, %v", plaintext, err)
 			}
 		})
 	}
@@ -414,12 +414,12 @@ func TestPayloadStructShapeAndEmissionFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("legacy encrypt: %v", err)
 	}
-	laravel, err := encryptWithKeyAndReader(key, "secret", payloadFormatLaravel, bytes.NewReader(fixtureIV(t)))
+	interop, err := encryptWithKeyAndReader(key, "secret", payloadFormatInterop, bytes.NewReader(fixtureIV(t)))
 	if err != nil {
-		t.Fatalf("Laravel encrypt: %v", err)
+		t.Fatalf("interop encrypt: %v", err)
 	}
 
-	for name, encoded := range map[string]string{"legacy": legacy, "laravel": laravel} {
+	for name, encoded := range map[string]string{"legacy": legacy, "interop": interop} {
 		raw, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil {
 			t.Fatalf("decode %s payload: %v", name, err)
@@ -432,8 +432,8 @@ func TestPayloadStructShapeAndEmissionFields(t *testing.T) {
 		if name == "legacy" && hasTag {
 			t.Fatal("legacy payload unexpectedly gained tag field")
 		}
-		if name == "laravel" && (!hasTag || fields["tag"] != "") {
-			t.Fatalf("Laravel tag = %#v", fields["tag"])
+		if name == "interop" && (!hasTag || fields["tag"] != "") {
+			t.Fatalf("interop tag = %#v", fields["tag"])
 		}
 	}
 }
@@ -453,23 +453,23 @@ func TestPublicEncryptionAPIsAndAutomaticReads(t *testing.T) {
 		write func(string) (string, error)
 	}{
 		{name: "global_legacy", write: Encrypt},
-		{name: "global_laravel", write: EncryptLaravel},
+		{name: "global_interop", write: EncryptForInterop},
 		{name: "instance_legacy", write: cipher.Encrypt},
-		{name: "instance_laravel", write: cipher.EncryptLaravel},
+		{name: "instance_interop", write: cipher.EncryptForInterop},
 	}
 	for _, writer := range writers {
 		writer := writer
 		t.Run(writer.name, func(t *testing.T) {
-			encoded, err := writer.write("Go + Laravel 🔐")
+			encoded, err := writer.write("Go + interop 🔐")
 			if err != nil {
 				t.Fatalf("encrypt: %v", err)
 			}
 			got, err := cipher.Decrypt(encoded)
-			if err != nil || got != "Go + Laravel 🔐" {
+			if err != nil || got != "Go + interop 🔐" {
 				t.Fatalf("instance decrypt = %q, %v", got, err)
 			}
 			got, err = Decrypt(encoded)
-			if err != nil || got != "Go + Laravel 🔐" {
+			if err != nil || got != "Go + interop 🔐" {
 				t.Fatalf("global decrypt = %q, %v", got, err)
 			}
 		})
@@ -491,7 +491,7 @@ func TestDecryptUsesPreviousKeysForBothFormats(t *testing.T) {
 		plaintext  string
 	}{
 		{ciphertext: legacyFixtures[0].ciphertext, plaintext: legacyFixtures[0].plaintext},
-		{ciphertext: laravelFixtures[5].ciphertext, plaintext: laravelFixtures[5].plaintext},
+		{ciphertext: interopFixtures[5].ciphertext, plaintext: interopFixtures[5].plaintext},
 	} {
 		got, err := cipher.Decrypt(fixture.ciphertext)
 		if err != nil || got != fixture.plaintext {
@@ -506,7 +506,7 @@ func TestDecryptWrongKeyReturnsAuthenticationSentinel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	for _, encoded := range []string{legacyFixtures[0].ciphertext, laravelFixtures[4].ciphertext} {
+	for _, encoded := range []string{legacyFixtures[0].ciphertext, interopFixtures[4].ciphertext} {
 		_, err := cipher.Decrypt(encoded)
 		if err != ErrAuthentication {
 			t.Fatalf("wrong-key error = %v, want exact ErrAuthentication", err)
@@ -522,7 +522,7 @@ func TestDecryptTamperingReturnsAuthenticationSentinel(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	raw, err := base64.StdEncoding.DecodeString(laravelFixtures[4].ciphertext)
+	raw, err := base64.StdEncoding.DecodeString(interopFixtures[4].ciphertext)
 	if err != nil {
 		t.Fatalf("decode fixture: %v", err)
 	}
@@ -572,7 +572,7 @@ func TestDecryptRejectsMalformedPayloadsWithoutPanicking(t *testing.T) {
 	validIV := base64.StdEncoding.EncodeToString(make([]byte, aes.BlockSize))
 	validValue := base64.StdEncoding.EncodeToString(make([]byte, aes.BlockSize))
 	validLegacyMAC := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	validLaravelMAC := strings.Repeat("a", 64)
+	validHexMAC := strings.Repeat("a", 64)
 
 	tests := map[string]string{
 		"outer_base64":   "not base64!",
@@ -586,9 +586,9 @@ func TestDecryptRejectsMalformedPayloadsWithoutPanicking(t *testing.T) {
 		"value_partial":  encodeTestEnvelope(t, map[string]any{"iv": validIV, "value": base64.StdEncoding.EncodeToString([]byte{1, 2, 3}), "mac": validLegacyMAC}),
 		"mac_encoding":   encodeTestEnvelope(t, map[string]any{"iv": validIV, "value": validValue, "mac": "?"}),
 		"mac_length":     encodeTestEnvelope(t, map[string]any{"iv": validIV, "value": validValue, "mac": base64.StdEncoding.EncodeToString(make([]byte, 31))}),
-		"mac_upper_hex":  encodeTestEnvelope(t, map[string]any{"iv": validIV, "value": validValue, "mac": strings.ToUpper(validLaravelMAC)}),
-		"tag_non_string": encodeTestEnvelope(t, map[string]any{"iv": validIV, "value": validValue, "mac": validLaravelMAC, "tag": 1}),
-		"tag_non_empty":  encodeTestEnvelope(t, map[string]any{"iv": validIV, "value": validValue, "mac": validLaravelMAC, "tag": "aGVsbG8="}),
+		"mac_upper_hex":  encodeTestEnvelope(t, map[string]any{"iv": validIV, "value": validValue, "mac": strings.ToUpper(validHexMAC)}),
+		"tag_non_string": encodeTestEnvelope(t, map[string]any{"iv": validIV, "value": validValue, "mac": validHexMAC, "tag": 1}),
+		"tag_non_empty":  encodeTestEnvelope(t, map[string]any{"iv": validIV, "value": validValue, "mac": validHexMAC, "tag": "aGVsbG8="}),
 	}
 	for name, encoded := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -677,9 +677,9 @@ func TestNoArbitraryPlaintextLimit(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	plaintext := strings.Repeat("0123456789abcdef", 1<<16)
-	encoded, err := cipher.EncryptLaravel(plaintext)
+	encoded, err := cipher.EncryptForInterop(plaintext)
 	if err != nil {
-		t.Fatalf("EncryptLaravel large payload: %v", err)
+		t.Fatalf("EncryptForInterop large payload: %v", err)
 	}
 	got, err := cipher.Decrypt(encoded)
 	if err != nil || got != plaintext {
@@ -702,7 +702,7 @@ func TestCipherConcurrentUse(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			encoded, err := cipher.EncryptLaravel("concurrent")
+			encoded, err := cipher.EncryptForInterop("concurrent")
 			if err != nil {
 				errorsSeen <- err
 				return
@@ -747,7 +747,7 @@ func FuzzCipherDecryptNeverPanics(f *testing.F) {
 	if err != nil {
 		f.Fatalf("New: %v", err)
 	}
-	for _, seed := range []string{"", "not-base64", legacyFixtures[0].ciphertext, laravelFixtures[4].ciphertext} {
+	for _, seed := range []string{"", "not-base64", legacyFixtures[0].ciphertext, interopFixtures[4].ciphertext} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, payload string) {

@@ -13,13 +13,14 @@ import (
 
 // main keeps the generated API example executable so documentation drift fails during compilation.
 func main() {
-	// EncryptLaravel encrypts plaintext with APP_KEY in Laravel's encryptString CBC format.
+	// EncryptForInterop encrypts plaintext with APP_KEY using the interoperability CBC envelope.
+	// The envelope signs the base64 IV and ciphertext, encodes the MAC as lowercase hex, and includes an empty tag.
 	// This explicit opt-in avoids silently changing the existing Encrypt wire format.
 
-	// Example: emit a Laravel-compatible ciphertext from APP_KEY
+	// Example: emit an interoperability ciphertext from APP_KEY
 	appKey, _ := crypt.GenerateAppKey()
 	_ = os.Setenv("APP_KEY", appKey)
-	ciphertext, err := crypt.EncryptLaravel("secret")
+	ciphertext, err := crypt.EncryptForInterop("secret")
 	godump.Dump(err == nil, ciphertext != "")
 	// #bool true
 	// #bool true
