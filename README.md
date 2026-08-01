@@ -397,4 +397,4 @@ godump.Dump(err == nil, newKey != "")
 
 ## Development
 
-Use `make test` for the root module, `make vet` for static checks, and `make generate` to refresh generated documentation. The `examples` directory is a separate Go module and can be tested from that directory when changed. The docs watcher remains available as `sh docs/watcher.sh`.
+Use `make test` for the root module, `make vet` for static checks, and `make generate` to refresh generated documentation. Run `make docs-watch` to regenerate documentation as source files change. The `examples` directory is a separate Go module and can be tested from that directory when changed.
