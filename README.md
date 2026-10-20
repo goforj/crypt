@@ -398,3 +398,7 @@ godump.Dump(err == nil, newKey != "")
 ## Development
 
 Use `make test` for the root module, `make vet` for static checks, and `make generate` to refresh generated documentation. Run `make docs-watch` to regenerate documentation as source files change. The `examples` directory is a separate Go module and can be tested from that directory when changed.
+
+## Documentation
+
+Read the [crypt library documentation](https://goforj.dev/crypt) for standalone installation, usage, and API reference.
